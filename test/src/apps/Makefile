@@ -24,6 +24,7 @@ TEST_APPS := \
 	fdatasync \
 	file_io \
 	fork_c \
+	generate_tdx_quote \
 	getcpu \
 	getpid \
 	hello_pie \
