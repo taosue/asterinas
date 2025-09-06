@@ -46,4 +46,6 @@ pub enum IoctlCmd {
     KDFONTOP = 0x4B72,
     /// Get tdx report using TDCALL
     TDXGETREPORT = 0xc4405401,
+    /// Get Intel TDX report using TDVMCALL
+    TDXGETQUOTE = 0x80105404,
 }
