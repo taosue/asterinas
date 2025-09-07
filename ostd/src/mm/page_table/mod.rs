@@ -409,7 +409,6 @@ impl<C: PageTableConfig> PageTable<C> {
     /// Note that this function may fail reflect an accurate result if there are
     /// cursors concurrently accessing the same virtual address range, just like what
     /// happens for the hardware MMU walk.
-    #[cfg(ktest)]
     pub fn page_walk(&self, vaddr: Vaddr) -> Option<(Paddr, PageProperty)> {
         // SAFETY: The root node is a valid page table node so the address is valid.
         unsafe { page_walk::<C>(self.root_paddr(), vaddr) }
@@ -472,7 +471,6 @@ impl<C: PageTableConfig> PageTable<C> {
 ///
 /// For the software page walk, we only need to disable preemption at the beginning
 /// since the page table nodes won't be recycled in the RCU critical section.
-#[cfg(ktest)]
 pub(super) unsafe fn page_walk<C: PageTableConfig>(
     root_paddr: Paddr,
     vaddr: Vaddr,

@@ -4,7 +4,7 @@ use ostd::mm::{DmaCoherent, FrameAllocOptions, HasPaddr, VmIo, PAGE_SIZE};
 use alloc::vec;
 
 use tdx_guest::{
-    tdcall::{get_report, TdCallError},
+    tdcall::{extend_rtmr, get_report, TdCallError},
     tdvmcall::{get_quote, TdVmcallError},
     SHARED_MASK,
 };
@@ -19,12 +19,27 @@ use crate::{
 
 const TDX_REPORTDATA_LEN: usize = 64;
 const TDX_REPORT_LEN: usize = 1024;
+const TDX_EXTEND_RTMR_DATA_LEN: usize = 48;
 
 #[derive(Debug, Clone, Copy, Pod)]
 #[repr(C)]
 pub struct TdxQuoteRequest {
     buf: usize,
     len: usize,
+}
+
+#[derive(Debug, Clone, Copy, Pod)]
+#[repr(C)]
+struct TdxExtendRtmrReq {
+    data: [u8; TDX_EXTEND_RTMR_DATA_LEN],
+    index: u8,
+}
+
+#[repr(align(64))]
+#[repr(C)]
+struct ExtendRtmrWapper {
+    data: [u8; TDX_EXTEND_RTMR_DATA_LEN],
+    index: u8,
 }
 
 #[repr(align(64))]
@@ -143,6 +158,7 @@ impl FileIo for TdxGuest {
         match cmd {
             IoctlCmd::TDXGETREPORT => handle_get_report(arg),
             IoctlCmd::TDXGETQUOTE => handle_get_quote(arg),
+            IoctlCmd::TDXEXTENDRTMR => handle_extend_rtmr(arg),
             _ => return_errno_with_message!(Errno::EPERM, "Unsupported ioctl"),
         }
     }
@@ -248,4 +264,26 @@ fn parse_quote_header(buffer: &[u8]) -> tdx_quote_hdr {
         out_len,
         data: vec![0],
     }
+}
+
+fn handle_extend_rtmr(arg: usize) -> Result<i32> {
+    let current_task = ostd::task::Task::current().unwrap();
+    let user_space = CurrentUserSpace::new(current_task.as_thread_local().unwrap());
+    let extend_rtmr_req: TdxExtendRtmrReq = user_space.read_val(arg)?;
+
+    if extend_rtmr_req.index < 2 {
+        return Err(Error::with_message(Errno::EINVAL, "Invalid parameter"));
+    }
+    let wrapped_extend_rtmr = ExtendRtmrWapper {
+        data: extend_rtmr_req.data,
+        index: extend_rtmr_req.index,
+    };
+    if let Err(err) = extend_rtmr(
+        user_space.root_vmar().vm_space().pt.page_walk(wrapped_extend_rtmr.data.as_ptr() as Vaddr).unwrap().0 as u64,
+        wrapped_extend_rtmr.index as u64,
+    ) {
+        println!("[kernel]: TDX extend rtmr error");
+        return Err(err.into());
+    }
+    Ok(0)
 }

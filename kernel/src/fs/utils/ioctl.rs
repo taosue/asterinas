@@ -48,4 +48,6 @@ pub enum IoctlCmd {
     TDXGETREPORT = 0xc4405401,
     /// Get Intel TDX report using TDVMCALL
     TDXGETQUOTE = 0x80105404,
+    /// Allow userspace application to extend RTMR registers for Intel TDX attestation
+    TDXEXTENDRTMR = 0x80315403,
 }

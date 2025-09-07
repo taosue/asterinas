@@ -68,7 +68,7 @@ use crate::{
 /// [`UserMode::execute`]: crate::user::UserMode::execute
 #[derive(Debug)]
 pub struct VmSpace {
-    pt: PageTable<UserPtConfig>,
+    pub pt: PageTable<UserPtConfig>,
     cpus: AtomicCpuSet,
     iomems: SpinLock<Vec<IoMem>>,
 }
@@ -679,7 +679,7 @@ impl From<VmItem> for VmQueriedItem {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct UserPtConfig {}
+pub struct UserPtConfig {}
 
 // SAFETY: `item_into_raw` and `item_from_raw` are implemented correctly,
 unsafe impl PageTableConfig for UserPtConfig {
