@@ -376,6 +376,12 @@ tdx_attest_error_t tdx_att_get_quote(
         arg.buf = (__u64)p_get_quote_blob;
         arg.len = REQ_BUF_SIZE;
 
+        fprintf(stdout, "arg.buf: %lld\n", (__u64)p_get_quote_blob);
+        fprintf(stdout, "before version: %lld\n", p_get_quote_blob->version);
+        fprintf(stdout, "before status: %lld\n", p_get_quote_blob->status);
+        fprintf(stdout, "before in_len: %d\n", p_get_quote_blob->in_len);
+        fprintf(stdout, "before out_len: %d\n", p_get_quote_blob->out_len);
+
         ioctl_ret = ioctl(devfd, TDX_CMD_GET_QUOTE, &arg);
         if (EBUSY == ioctl_ret) {
             TDX_TRACE;
@@ -386,6 +392,12 @@ tdx_attest_error_t tdx_att_get_quote(
             ret = TDX_ATTEST_ERROR_QUOTE_FAILURE;
             goto ret_point;
         }
+
+        fprintf(stdout, "after version: %lld\n", p_get_quote_blob->version);
+        fprintf(stdout, "after status: %lld\n", p_get_quote_blob->status);
+        fprintf(stdout, "after in_len: %d\n", p_get_quote_blob->in_len);
+        fprintf(stdout, "after out_len: %d\n", p_get_quote_blob->out_len);
+
         if (p_get_quote_blob->status
             || p_get_quote_blob->out_len <= HEADER_SIZE) {
             TDX_TRACE;

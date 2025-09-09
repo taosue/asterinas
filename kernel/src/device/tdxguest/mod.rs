@@ -62,6 +62,7 @@ struct QuoteEntry {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct tdx_quote_hdr {
     // Quote version, filled by TD
     version: u64,
@@ -203,22 +204,32 @@ fn handle_get_quote(arg: usize) -> Result<i32> {
     const GET_QUOTE_IN_FLIGHT: u64 = 0xFFFF_FFFF_FFFF_FFFF;
     let current_task = ostd::task::Task::current().unwrap();
     let user_space = CurrentUserSpace::new(current_task.as_thread_local().unwrap());
+
+    error!("in handle_get_quote()");
+
     let tdx_quote: TdxQuoteRequest = user_space.read_val(arg)?;
     if tdx_quote.len == 0 {
         return Err(Error::with_message(Errno::EBUSY, "Invalid parameter"));
     }
+
+    println!("tdx_quote: {:?}", tdx_quote);
+
     let entry = alloc_quote_entry(tdx_quote.len);
 
     // Copy data (with TDREPORT) from user buffer to kernel Quote buffer
     let mut quote_buffer = vec![0u8; entry.buf_len];
-    user_space.read_bytes(tdx_quote.buf, &mut (&mut quote_buffer[..]).into())?;
+    let quote_slice: &mut [u8] = &mut quote_buffer;
+    user_space.read_bytes(tdx_quote.buf, &mut VmWriter::from(quote_slice))?;
+
     entry.buf.write_bytes(0, &quote_buffer)?;
+
+    println!("before: tdx quote hdr: {:X?}", parse_quote_header(&quote_buffer));
 
     if let Err(err) = get_quote(
         (entry.buf.paddr() as u64) | SHARED_MASK,
         entry.buf_len as u64,
     ) {
-        println!("[kernel] get quote error: {:?}", err);
+        error!("[kernel] get quote error: {:?}", err);
         return Err(err.into());
     }
 
@@ -232,8 +243,11 @@ fn handle_get_quote(arg: usize) -> Result<i32> {
     }
     entry.buf.read_bytes(0, &mut quote_buffer)?;
 
+    println!("after: tdx quote hdr: {:X?}", parse_quote_header(&quote_buffer));
+
     let quote_slice: &[u8] = &quote_buffer;
     user_space.write_bytes(tdx_quote.buf, &mut VmReader::from(quote_slice))?;
+
     Ok(0)
 }
 
@@ -252,10 +266,10 @@ fn alloc_quote_entry(buf_len: usize) -> QuoteEntry {
 }
 
 fn parse_quote_header(buffer: &[u8]) -> tdx_quote_hdr {
-    let version = u64::from_be_bytes(buffer[0..8].try_into().unwrap());
-    let status = u64::from_be_bytes(buffer[8..16].try_into().unwrap());
-    let in_len = u32::from_be_bytes(buffer[16..20].try_into().unwrap());
-    let out_len = u32::from_be_bytes(buffer[20..24].try_into().unwrap());
+    let version = u64::from_le_bytes(buffer[0..8].try_into().unwrap());
+    let status = u64::from_le_bytes(buffer[8..16].try_into().unwrap());
+    let in_len = u32::from_le_bytes(buffer[16..20].try_into().unwrap());
+    let out_len = u32::from_le_bytes(buffer[20..24].try_into().unwrap());
 
     tdx_quote_hdr {
         version,

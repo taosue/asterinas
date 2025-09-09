@@ -14,6 +14,7 @@ ASM_SRCS := $(wildcard *.S)
 ASM_OBJS := $(addprefix $(OBJ_OUTPUT_DIR)/,$(ASM_SRCS:%.S=%))
 CC ?= gcc
 C_FLAGS ?= -Wall -Werror
+EXTRA_C_FLAGS := -DDEBUG
 
 .PHONY: all
 
@@ -23,9 +24,9 @@ $(OBJ_OUTPUT_DIR):
 	@mkdir -p $(OBJ_OUTPUT_DIR)
 
 $(OBJ_OUTPUT_DIR)/generate_tdx_quote: test_tdx_attest.c tdx_attest.c qgs_msg_lib.cpp
-	@$(CC) $(C_FLAGS) $^ -o $@
+	@$(CC) $(C_FLAGS) $^ -o $@ $(EXTRA_C_FLAGS)
 	@echo "CC <= $@"
 
 $(OBJ_OUTPUT_DIR)/%: %.c
-	@$(CC) $(C_FLAGS) $< -o $@
+	@$(CC) $(C_FLAGS) $< -o $@ $(EXTRA_C_FLAGS)
 	@echo "CC <= $@"
