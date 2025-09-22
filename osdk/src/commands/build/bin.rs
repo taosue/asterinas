@@ -159,9 +159,12 @@ fn install_setup_with_arch(
     aster_elf: &AsterBin,
     encoding: PayloadEncoding,
 ) {
-    if !target_dir.as_ref().exists() {
-        std::fs::create_dir_all(&target_dir).unwrap();
+    if target_dir.as_ref().exists() {
+        std::fs::remove_dir_all(&target_dir).unwrap();
     }
+
+    std::fs::create_dir_all(&target_dir).unwrap();
+
     let target_dir = std::fs::canonicalize(target_dir).unwrap();
 
     let mut cmd = new_command_checked_exists("cargo");
