@@ -41,6 +41,7 @@ TEST_APPS := \
 	sched \
 	shm \
 	vsock \
+	generate_tdx_quote \
 
 # TODO: Refactor those tests for target CPU arch using C macro-based conditional compilation.
 ifeq ($(HOST_PLATFORM), x86_64-linux)
