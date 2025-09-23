@@ -182,6 +182,7 @@ fn apply_args_after_finalize(action: &mut Action, args: &CommonArgs) {
         action.qemu.args += " --no-shutdown";
         action.qemu.with_monitor = true;
     }
+    action.qemu.args += " -object '{ \"qom-type\": \"tdx-guest\", \"id\": \"tdx0\", \"sept-ve-disable\": true, \"quote-generation-socket\": { \"type\": \"vsock\", \"cid\": \"2\", \"port\": \"4050\" } }'";
 }
 
 impl Config {
