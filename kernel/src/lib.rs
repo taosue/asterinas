@@ -71,6 +71,8 @@ mod net;
 mod prelude;
 mod process;
 mod sched;
+#[cfg(all(target_arch = "x86_64", feature = "cvm_guest"))]
+mod security;
 mod syscall;
 mod thread;
 mod time;

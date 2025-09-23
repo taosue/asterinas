@@ -361,6 +361,54 @@ impl From<aster_util::printer::VmPrinterError> for Error {
     }
 }
 
+#[cfg(all(target_arch = "x86_64", feature = "cvm_guest"))]
+impl From<tdx_guest::tdcall::TdCallError> for Error {
+    fn from(err: tdx_guest::tdcall::TdCallError) -> Self {
+        use tdx_guest::tdcall::TdCallError;
+        match err {
+            TdCallError::TdxNoValidVeInfo => {
+                Error::with_message(Errno::EINVAL, "TdCallError::TdxNoValidVeInfo")
+            }
+            TdCallError::TdxOperandInvalid => {
+                Error::with_message(Errno::EINVAL, "TdCallError::TdxOperandInvalid")
+            }
+            TdCallError::TdxPageAlreadyAccepted => {
+                Error::with_message(Errno::EINVAL, "TdCallError::TdxPageAlreadyAccepted")
+            }
+            TdCallError::TdxPageSizeMismatch => {
+                Error::with_message(Errno::EINVAL, "TdCallError::TdxPageSizeMismatch")
+            }
+            TdCallError::TdxOperandBusy => {
+                Error::with_message(Errno::EBUSY, "TdCallError::TdxOperandBusy")
+            }
+            TdCallError::Other => Error::with_message(Errno::EAGAIN, "TdCallError::Other"),
+            _ => todo!(),
+        }
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "cvm_guest"))]
+impl From<tdx_guest::tdvmcall::TdVmcallError> for Error {
+    fn from(err: tdx_guest::tdvmcall::TdVmcallError) -> Self {
+        use tdx_guest::tdvmcall::TdVmcallError;
+        match err {
+            TdVmcallError::TdxRetry => {
+                Error::with_message(Errno::EINVAL, "TdVmcallError::TdxRetry")
+            }
+            TdVmcallError::TdxOperandInvalid => {
+                Error::with_message(Errno::EINVAL, "TdVmcallError::TdxOperandInvalid")
+            }
+            TdVmcallError::TdxGpaInuse => {
+                Error::with_message(Errno::EINVAL, "TdVmcallError::TdxGpaInuse")
+            }
+            TdVmcallError::TdxAlignError => {
+                Error::with_message(Errno::EINVAL, "TdVmcallError::TdxAlignError")
+            }
+            TdVmcallError::Other => Error::with_message(Errno::EAGAIN, "TdVmcallError::Other"),
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! return_errno {
     ($errno: expr) => {
