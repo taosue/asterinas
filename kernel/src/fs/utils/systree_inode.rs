@@ -307,7 +307,7 @@ impl<KInode: SysTreeInodeTy + Send + Sync + 'static> Inode for KInode {
     }
 
     default fn resize(&self, _new_size: usize) -> Result<()> {
-        Err(Error::new(Errno::EPERM))
+        Ok(())
     }
 
     default fn atime(&self) -> Duration {
