@@ -5,7 +5,10 @@ use core::{mem::size_of, time::Duration};
 use align_ext::AlignExt;
 use aster_util::{field_ptr, safe_ptr::SafePtr};
 use ostd::{
-    mm::{DmaCoherent, FrameAllocOptions, HasPaddr, HasSize, VmIo, PAGE_SIZE},
+    mm::{
+        io_util::HasVmReaderWriter, DmaCoherent, FrameAllocOptions, HasPaddr, HasSize, VmIo,
+        PAGE_SIZE,
+    },
     sync::WaitQueue,
 };
 use tdx_guest::{
@@ -27,6 +30,8 @@ use crate::{
 
 const TDX_REPORTDATA_LEN: usize = 64;
 const TDX_REPORT_LEN: usize = 1024;
+
+static REPORT_DMA_BUFFER: RwMutex<Option<DmaCoherent>> = RwMutex::new(None);
 
 #[derive(Debug, Clone, Copy, Pod)]
 #[repr(C)]
@@ -119,7 +124,8 @@ pub fn tdx_get_quote(inblob: &[u8]) -> Result<Box<[u8]>> {
     const GET_QUOTE_IN_FLIGHT: u64 = 0xFFFF_FFFF_FFFF_FFFF;
     const GET_QUOTE_BUF_SIZE: usize = 8 * 1024;
 
-    let report = tdx_get_report(inblob)?;
+    tdx_refresh_report(inblob)?;
+
     let buf = alloc_dma_buf(GET_QUOTE_BUF_SIZE)?;
     let report_ptr: SafePtr<TdxQuoteHdr, _, _> = SafePtr::new(&buf, 0);
 
@@ -127,7 +133,17 @@ pub fn tdx_get_quote(inblob: &[u8]) -> Result<Box<[u8]>> {
     field_ptr!(&report_ptr, TdxQuoteHdr, status).write(&0u64)?;
     field_ptr!(&report_ptr, TdxQuoteHdr, in_len).write(&(TDX_REPORT_LEN as u32))?;
     field_ptr!(&report_ptr, TdxQuoteHdr, out_len).write(&0u32)?;
-    buf.write_bytes(size_of::<TdxQuoteHdr>(), &report)?;
+    buf.write(
+        size_of::<TdxQuoteHdr>(),
+        &mut (REPORT_DMA_BUFFER
+            .read()
+            .as_ref()
+            .unwrap()
+            .reader()
+            .limit(TDX_REPORT_LEN)
+            .clone()
+            .to_fallible()),
+    )?;
 
     // FIXME: The `get_quote` API from the `tdx_guest` crate should have been marked `unsafe`
     // because it has no way to determine if the input physical address is safe or not.
@@ -172,39 +188,43 @@ fn handle_get_report(arg: usize) -> Result<i32> {
     let user_space = CurrentUserSpace::new(current_task.as_thread_local().unwrap());
     let user_request: TdxReportRequest = user_space.read_val(arg)?;
 
-    let report = tdx_get_report(&user_request.report_data)?;
+    tdx_refresh_report(&user_request.report_data)?;
 
     let tdx_report_vaddr = arg + TDX_REPORTDATA_LEN;
-    user_space.write_bytes(tdx_report_vaddr, &mut VmReader::from(report.as_ref()))?;
+    user_space.write_bytes(
+        tdx_report_vaddr,
+        &mut (REPORT_DMA_BUFFER
+            .read()
+            .as_ref()
+            .unwrap()
+            .reader()
+            .limit(TDX_REPORT_LEN)),
+    )?;
     Ok(0)
 }
 
-fn tdx_get_report(inblob: &[u8]) -> Result<Box<[u8]>> {
+fn tdx_refresh_report(inblob: &[u8]) -> Result<()> {
     if inblob.len() != TDX_REPORTDATA_LEN {
         return_errno_with_message!(Errno::EINVAL, "Invalid inblob length");
     }
 
-    let segment = FrameAllocOptions::new().alloc_segment(2)?;
-    let dma_coherent = DmaCoherent::map(segment.into(), false).unwrap();
+    let mut binding = REPORT_DMA_BUFFER.write();
+    if binding.as_ref().is_none() {
+        let dma_buf = alloc_dma_buf(2 * PAGE_SIZE)?;
+        *binding = Some(dma_buf);
+    }
+
+    let dma_coherent = binding.as_ref().unwrap();
     dma_coherent.write_bytes(0, &inblob).unwrap();
 
     // FIXME: The `get_report` API from the `tdx_guest` crate should have been marked `unsafe`
     // because it has no way to determine if the input physical address is safe or not.
     get_report(
-        ((dma_coherent.paddr() + 1024) as u64) | SHARED_MASK,
         (dma_coherent.paddr() as u64) | SHARED_MASK,
+        ((dma_coherent.paddr() + PAGE_SIZE) as u64) | SHARED_MASK,
     )?;
 
-    // Note: We cannot convert `DmaCoherent` to `USegment` here. When shared memory is converted back
-    // to private memory in TDX, `TDG.MEM.PAGE.ACCEPT` will zero out all content.
-    // TDX Module Specification - `TDG.MEM.PAGE.ACCEPT` Leaf:
-    // "Accept a pending private page and initialize it to all-0 using the TD ephemeral private key."
-    let mut generated_report = Box::new([0u8; TDX_REPORT_LEN]);
-    dma_coherent
-        .read_bytes(1024, generated_report.as_mut())
-        .unwrap();
-
-    Ok(generated_report)
+    Ok(())
 }
 
 fn alloc_dma_buf(buf_len: usize) -> Result<DmaCoherent> {
