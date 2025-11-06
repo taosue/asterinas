@@ -6,13 +6,13 @@ use align_ext::AlignExt;
 use aster_util::{field_ptr, safe_ptr::SafePtr};
 use ostd::{
     mm::{
-        io_util::HasVmReaderWriter, DmaCoherent, FrameAllocOptions, HasPaddr, HasSize, VmIo,
-        PAGE_SIZE,
+        io_util::HasVmReaderWriter, DmaCoherent, FrameAllocOptions, HasPaddr, HasSize, USegment,
+        VmIo, PAGE_SIZE,
     },
     sync::WaitQueue,
 };
 use tdx_guest::{
-    tdcall::{get_report, TdCallError},
+    tdcall::{extend_rtmr, get_report, TdCallError},
     tdvmcall::{get_quote, TdVmcallError},
     SHARED_MASK,
 };
@@ -38,6 +38,17 @@ static REPORT_DMA_BUFFER: RwMutex<Option<DmaCoherent>> = RwMutex::new(None);
 pub struct TdxReportRequest {
     report_data: [u8; TDX_REPORTDATA_LEN],
     tdx_report: [u8; TDX_REPORT_LEN],
+}
+
+pub enum TdReportFields {
+    MrConfigId,
+    MrOwner,
+    MrOwnerConfig,
+    MrTd,
+    Rtmr0,
+    Rtmr1,
+    Rtmr2,
+    Rtmr3,
 }
 
 pub struct TdxGuest;
@@ -171,6 +182,49 @@ pub fn tdx_get_quote(inblob: &[u8]) -> Result<Box<[u8]>> {
     Ok(outblob)
 }
 
+pub fn tdx_get_mr(field: TdReportFields) -> Result<[u8; SHA384_DIGEST_SIZE]> {
+    let binding = REPORT_DMA_BUFFER.read();
+    let report = binding.as_ref().ok_or_else(|| {
+        Error::with_message(Errno::EINVAL, "TDX report buffer is not generated yet")
+    })?;
+
+    let mut mr = [0u8; SHA384_DIGEST_SIZE];
+    report.read_bytes(field.offset(), &mut mr)?;
+    Ok(mr)
+}
+
+pub fn tdx_extend_rtmr(field: TdReportFields, data: &[u8; SHA384_DIGEST_SIZE]) -> Result<()> {
+    let index = match field {
+        TdReportFields::Rtmr0 => 0,
+        TdReportFields::Rtmr1 => 1,
+        TdReportFields::Rtmr2 => 2,
+        TdReportFields::Rtmr3 => 3,
+        _ => {
+            return_errno_with_message!(Errno::EINVAL, "Invalid field for RTMR extension")
+        }
+    };
+
+    let segment: USegment = FrameAllocOptions::new().alloc_segment(1)?.into();
+    segment.write_bytes(0, data)?;
+
+    let mut binding = REPORT_DMA_BUFFER.write();
+    let report = binding.as_mut().ok_or_else(|| {
+        Error::with_message(Errno::EINVAL, "TDX report buffer is not generated yet")
+    })?;
+
+    extend_rtmr(segment.paddr() as u64, index as u64)?;
+
+    report.write(
+        field.offset(),
+        &mut segment
+            .reader()
+            .limit(SHA384_DIGEST_SIZE)
+            .clone()
+            .to_fallible(),
+    )?;
+    Ok(())
+}
+
 #[repr(C)]
 struct TdxQuoteHdr {
     // Quote version, filled by TD
@@ -233,4 +287,34 @@ fn alloc_dma_buf(buf_len: usize) -> Result<DmaCoherent> {
 
     let dma_buf = DmaCoherent::map(segment.into(), false).unwrap();
     Ok(dma_buf)
+}
+
+const SHA384_DIGEST_SIZE: usize = 48;
+const TDREPORT_REPORTDATA: usize = 128;
+const TDREPORT_TEE_TCB_INFO: usize = 256;
+const TDREPORT_TDINFO: usize = TDREPORT_TEE_TCB_INFO + 256;
+const TDREPORT_ATTRIBUTES: usize = TDREPORT_TDINFO;
+const TDREPORT_XFAM: usize = TDREPORT_ATTRIBUTES + core::mem::size_of::<u64>();
+const TDREPORT_MRTD: usize = TDREPORT_XFAM + core::mem::size_of::<u64>();
+const TDREPORT_MRCONFIGID: usize = TDREPORT_MRTD + SHA384_DIGEST_SIZE;
+const TDREPORT_MROWNER: usize = TDREPORT_MRCONFIGID + SHA384_DIGEST_SIZE;
+const TDREPORT_MROWNERCONFIG: usize = TDREPORT_MROWNER + SHA384_DIGEST_SIZE;
+const TDREPORT_RTMR0: usize = TDREPORT_MROWNERCONFIG + SHA384_DIGEST_SIZE;
+const TDREPORT_RTMR1: usize = TDREPORT_RTMR0 + SHA384_DIGEST_SIZE;
+const TDREPORT_RTMR2: usize = TDREPORT_RTMR1 + SHA384_DIGEST_SIZE;
+const TDREPORT_RTMR3: usize = TDREPORT_RTMR2 + SHA384_DIGEST_SIZE;
+
+impl TdReportFields {
+    fn offset(&self) -> usize {
+        match self {
+            TdReportFields::MrConfigId => TDREPORT_MRCONFIGID,
+            TdReportFields::MrOwner => TDREPORT_MROWNER,
+            TdReportFields::MrOwnerConfig => TDREPORT_MROWNERCONFIG,
+            TdReportFields::MrTd => TDREPORT_TDINFO,
+            TdReportFields::Rtmr0 => TDREPORT_RTMR0,
+            TdReportFields::Rtmr1 => TDREPORT_RTMR1,
+            TdReportFields::Rtmr2 => TDREPORT_RTMR2,
+            TdReportFields::Rtmr3 => TDREPORT_RTMR3,
+        }
+    }
 }
