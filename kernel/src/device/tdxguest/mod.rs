@@ -41,6 +41,7 @@ pub struct TdxReportRequest {
 }
 
 pub enum TdReportFields {
+    ReportInblob,
     MrConfigId,
     MrOwner,
     MrOwnerConfig,
@@ -135,7 +136,7 @@ pub fn tdx_get_quote(inblob: &[u8]) -> Result<Box<[u8]>> {
     const GET_QUOTE_IN_FLIGHT: u64 = 0xFFFF_FFFF_FFFF_FFFF;
     const GET_QUOTE_BUF_SIZE: usize = 8 * 1024;
 
-    tdx_refresh_report(inblob)?;
+    tdx_get_report(inblob)?;
 
     let buf = alloc_dma_buf(GET_QUOTE_BUF_SIZE)?;
     let report_ptr: SafePtr<TdxQuoteHdr, _, _> = SafePtr::new(&buf, 0);
@@ -183,6 +184,9 @@ pub fn tdx_get_quote(inblob: &[u8]) -> Result<Box<[u8]>> {
 }
 
 pub fn tdx_get_mr(field: TdReportFields) -> Result<[u8; SHA384_DIGEST_SIZE]> {
+    // TODO: Just refresh the report after rtmr is updated.
+    tdx_refresh_report()?;
+
     let binding = REPORT_DMA_BUFFER.read();
     let report = binding.as_ref().ok_or_else(|| {
         Error::with_message(Errno::EINVAL, "TDX report buffer is not generated yet")
@@ -208,20 +212,12 @@ pub fn tdx_extend_rtmr(field: TdReportFields, data: &[u8; SHA384_DIGEST_SIZE]) -
     segment.write_bytes(0, data)?;
 
     let mut binding = REPORT_DMA_BUFFER.write();
-    let report = binding.as_mut().ok_or_else(|| {
+    let _ = binding.as_mut().ok_or_else(|| {
         Error::with_message(Errno::EINVAL, "TDX report buffer is not generated yet")
     })?;
 
     extend_rtmr(segment.paddr() as u64, index as u64)?;
 
-    report.write(
-        field.offset(),
-        &mut segment
-            .reader()
-            .limit(SHA384_DIGEST_SIZE)
-            .clone()
-            .to_fallible(),
-    )?;
     Ok(())
 }
 
@@ -242,7 +238,7 @@ fn handle_get_report(arg: usize) -> Result<i32> {
     let user_space = CurrentUserSpace::new(current_task.as_thread_local().unwrap());
     let user_request: TdxReportRequest = user_space.read_val(arg)?;
 
-    tdx_refresh_report(&user_request.report_data)?;
+    tdx_get_report(&user_request.report_data)?;
 
     let tdx_report_vaddr = arg + TDX_REPORTDATA_LEN;
     user_space.write_bytes(
@@ -257,25 +253,43 @@ fn handle_get_report(arg: usize) -> Result<i32> {
     Ok(0)
 }
 
-fn tdx_refresh_report(inblob: &[u8]) -> Result<()> {
+fn tdx_get_report(inblob: &[u8]) -> Result<()> {
     if inblob.len() != TDX_REPORTDATA_LEN {
         return_errno_with_message!(Errno::EINVAL, "Invalid inblob length");
     }
 
     let mut binding = REPORT_DMA_BUFFER.write();
     if binding.as_ref().is_none() {
-        let dma_buf = alloc_dma_buf(2 * PAGE_SIZE)?;
+        let dma_buf = alloc_dma_buf(PAGE_SIZE)?;
         *binding = Some(dma_buf);
     }
-
     let dma_coherent = binding.as_ref().unwrap();
-    dma_coherent.write_bytes(0, &inblob).unwrap();
+
+    let inblob_offset = TdReportFields::ReportInblob.offset();
+    dma_coherent.write_bytes(inblob_offset, inblob).unwrap();
 
     // FIXME: The `get_report` API from the `tdx_guest` crate should have been marked `unsafe`
     // because it has no way to determine if the input physical address is safe or not.
     get_report(
         (dma_coherent.paddr() as u64) | SHARED_MASK,
-        ((dma_coherent.paddr() + PAGE_SIZE) as u64) | SHARED_MASK,
+        ((dma_coherent.paddr() + inblob_offset) as u64) | SHARED_MASK,
+    )?;
+
+    Ok(())
+}
+
+fn tdx_refresh_report() -> Result<()> {
+    let mut binding = REPORT_DMA_BUFFER.write();
+    let dma_coherent = binding.as_ref().ok_or_else(|| {
+        Error::with_message(Errno::EINVAL, "TDX report buffer is not generated yet")
+    })?;
+
+    let inblob_offset = TdReportFields::ReportInblob.offset();
+    // FIXME: The `get_report` API from the `tdx_guest` crate should have been marked `unsafe`
+    // because it has no way to determine if the input physical address is safe or not.
+    get_report(
+        (dma_coherent.paddr() as u64) | SHARED_MASK,
+        ((dma_coherent.paddr() + inblob_offset) as u64) | SHARED_MASK,
     )?;
 
     Ok(())
@@ -307,6 +321,7 @@ const TDREPORT_RTMR3: usize = TDREPORT_RTMR2 + SHA384_DIGEST_SIZE;
 impl TdReportFields {
     fn offset(&self) -> usize {
         match self {
+            TdReportFields::ReportInblob => TDREPORT_REPORTDATA,
             TdReportFields::MrConfigId => TDREPORT_MRCONFIGID,
             TdReportFields::MrOwner => TDREPORT_MROWNER,
             TdReportFields::MrOwnerConfig => TDREPORT_MROWNERCONFIG,
