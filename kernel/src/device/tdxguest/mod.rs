@@ -31,7 +31,7 @@ use crate::{
 const TDX_REPORTDATA_LEN: usize = 64;
 const TDX_REPORT_LEN: usize = 1024;
 
-static REPORT_DMA_BUFFER: RwMutex<Option<DmaCoherent>> = RwMutex::new(None);
+static REPORT_BUFFER: RwMutex<Option<USegment>> = RwMutex::new(None);
 
 #[derive(Debug, Clone, Copy, Pod)]
 #[repr(C)]
@@ -147,7 +147,7 @@ pub fn tdx_get_quote(inblob: &[u8]) -> Result<Box<[u8]>> {
     field_ptr!(&report_ptr, TdxQuoteHdr, out_len).write(&0u32)?;
     buf.write(
         size_of::<TdxQuoteHdr>(),
-        &mut (REPORT_DMA_BUFFER
+        &mut (REPORT_BUFFER
             .read()
             .as_ref()
             .unwrap()
@@ -187,7 +187,7 @@ pub fn tdx_get_mr(field: TdReportFields) -> Result<[u8; SHA384_DIGEST_SIZE]> {
     // TODO: Just refresh the report after rtmr is updated.
     tdx_refresh_report()?;
 
-    let binding = REPORT_DMA_BUFFER.read();
+    let binding = REPORT_BUFFER.read();
     let report = binding.as_ref().ok_or_else(|| {
         Error::with_message(Errno::EINVAL, "TDX report buffer is not generated yet")
     })?;
@@ -211,7 +211,7 @@ pub fn tdx_extend_rtmr(field: TdReportFields, data: &[u8; SHA384_DIGEST_SIZE]) -
     let segment: USegment = FrameAllocOptions::new().alloc_segment(1)?.into();
     segment.write_bytes(0, data)?;
 
-    let mut binding = REPORT_DMA_BUFFER.write();
+    let mut binding = REPORT_BUFFER.write();
     let _ = binding.as_mut().ok_or_else(|| {
         Error::with_message(Errno::EINVAL, "TDX report buffer is not generated yet")
     })?;
@@ -243,7 +243,7 @@ fn handle_get_report(arg: usize) -> Result<i32> {
     let tdx_report_vaddr = arg + TDX_REPORTDATA_LEN;
     user_space.write_bytes(
         tdx_report_vaddr,
-        &mut (REPORT_DMA_BUFFER
+        &mut (REPORT_BUFFER
             .read()
             .as_ref()
             .unwrap()
@@ -258,38 +258,38 @@ fn tdx_get_report(inblob: &[u8]) -> Result<()> {
         return_errno_with_message!(Errno::EINVAL, "Invalid inblob length");
     }
 
-    let mut binding = REPORT_DMA_BUFFER.write();
+    let mut binding = REPORT_BUFFER.write();
     if binding.as_ref().is_none() {
-        let dma_buf = alloc_dma_buf(PAGE_SIZE)?;
-        *binding = Some(dma_buf);
+        let buf: Usegment = FrameAllocOptions::new().alloc_segment(PAGE_SIZE)?.into();
+        *binding = Some(buf);
     }
-    let dma_coherent = binding.as_ref().unwrap();
+    let tdx_report = binding.as_ref().unwrap();
 
     let inblob_offset = TdReportFields::ReportInblob.offset();
-    dma_coherent.write_bytes(inblob_offset, inblob).unwrap();
+    tdx_report.write_bytes(inblob_offset, inblob).unwrap();
 
     // FIXME: The `get_report` API from the `tdx_guest` crate should have been marked `unsafe`
     // because it has no way to determine if the input physical address is safe or not.
     get_report(
-        (dma_coherent.paddr() as u64) | SHARED_MASK,
-        ((dma_coherent.paddr() + inblob_offset) as u64) | SHARED_MASK,
+        tdx_report.paddr() as u64,
+        (tdx_report.paddr() + inblob_offset) as u64,
     )?;
 
     Ok(())
 }
 
 fn tdx_refresh_report() -> Result<()> {
-    let mut binding = REPORT_DMA_BUFFER.write();
-    let dma_coherent = binding.as_ref().ok_or_else(|| {
-        Error::with_message(Errno::EINVAL, "TDX report buffer is not generated yet")
+    let mut binding = REPORT_BUFFER.write();
+    let tdx_report = binding.as_ref().ok_or_else(|| {
+        Error::with_message(Errno::EINVAL, "TDX report is not generated yet")
     })?;
 
     let inblob_offset = TdReportFields::ReportInblob.offset();
     // FIXME: The `get_report` API from the `tdx_guest` crate should have been marked `unsafe`
     // because it has no way to determine if the input physical address is safe or not.
     get_report(
-        (dma_coherent.paddr() as u64) | SHARED_MASK,
-        ((dma_coherent.paddr() + inblob_offset) as u64) | SHARED_MASK,
+        tdx_report.paddr() as u64,
+        (tdx_report.paddr() + inblob_offset) as u64,
     )?;
 
     Ok(())
