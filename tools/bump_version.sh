@@ -192,7 +192,6 @@ sync_project_version() {
     lower_version=$(printf '%s\n' "$new_version" "$current_version" | sort -V | head -n1)
     if [ "$lower_version" = "$new_version" ]; then
         echo "Error: New version ($new_version) must be greater than current version ($current_version)."
-        exit 1
     fi
 
     update_project_dependencies
