@@ -208,9 +208,9 @@ which are summarized in the table below.
 | 185     | security               | ❌             | N/A |
 | 186     | gettid                 | ✅             | 💯 |
 | 187     | readahead              | ❌             | N/A |
-| 188     | setxattr               | ✅             | ❓ |
-| 189     | lsetxattr              | ✅             | ❓ |
-| 190     | fsetxattr              | ✅             | ❓ |
+| 188     | setxattr               | ✅             | 💯 |
+| 189     | lsetxattr              | ✅             | 💯 |
+| 190     | fsetxattr              | ✅             | 💯 |
 | 191     | getxattr               | ✅             | 💯 |
 | 192     | lgetxattr              | ✅             | 💯 |
 | 193     | fgetxattr              | ✅             | 💯 |
