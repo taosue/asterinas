@@ -327,7 +327,7 @@ which are summarized in the table below.
 | 304     | open_by_handle_at      | ❌             | N/A |
 | 305     | clock_adjtime          | ❌             | N/A |
 | 306     | syncfs                 | ✅             | 💯 |
-| 307     | sendmmsg               | ✅             | [⚠️](syscall-flag-coverage/networking-and-sockets/#sendto-and-sendmsg) |
+| 307     | sendmmsg               | ✅             | [⚠️](syscall-flag-coverage/networking-and-sockets/#sendto-sendmsg-and-sendmmsg) |
 | 308     | setns                  | ✅             | ❓ |
 | 309     | getcpu                 | ✅             | 💯 |
 | 310     | process_vm_readv       | ❌             | N/A |
