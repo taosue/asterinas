@@ -14,11 +14,13 @@ pub mod tdxguest;
 
 static MISC_MAJOR: Once<MajorIdOwner> = Once::new();
 
+use super::registry::char::register;
+
 pub(super) fn init_in_first_kthread() {
     MISC_MAJOR.call_once(|| acquire_major(MajorId::new(10)).unwrap());
 
     #[cfg(target_arch = "x86_64")]
     ostd::if_tdx_enabled!({
-        super::registry::char::register(tdxguest::TdxGuest::new()).unwrap();
+        tdxguest::init().unwrap();
     });
 }
