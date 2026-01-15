@@ -62,6 +62,16 @@ impl BootScheme {
         let mut kcmdline = self.kcmd_args;
         kcmdline.push("--".to_owned());
         kcmdline.extend(self.init_args);
+
+        // Wrap the whole cmdline, i.e.,
+        // [a, b, --, c, d] => ["ASTERINAS(a", "b", "--", "c", "d)"]
+        if !kcmdline.is_empty() {
+            kcmdline[0] = format!("ASTERINAS({}", kcmdline[0]);
+            if let Some(last) = kcmdline.last_mut() {
+                last.push(')');
+            }
+        }
+
         Boot {
             kcmdline,
             initramfs: self.initramfs,

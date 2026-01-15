@@ -97,6 +97,41 @@ pub(crate) struct EarlyBootInfo {
 /// The boot-time information.
 pub(crate) static EARLY_INFO: Once<EarlyBootInfo> = Once::new();
 
+/// Extracts the actual command line from an Asterinas-wrapped command line string.
+fn extract_asterinas_wrapped_cmdline(cmdline: &str) -> &str {
+    const PREFIX: &str = "ASTERINAS(";
+
+    let Some(start) = cmdline.find(PREFIX) else {
+        return cmdline;
+    };
+
+    let payload_start = start + PREFIX.len();
+    let bytes = cmdline.as_bytes();
+
+    // We have consumed the first '(' in PREFIX.
+    let mut depth: i32 = 1;
+
+    let mut i = payload_start;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &cmdline[payload_start..i];
+                }
+                if depth < 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    cmdline
+}
+
 /// Initializes the boot information.
 ///
 /// This function copies the boot-time accessible information to the heap to
@@ -106,7 +141,8 @@ pub(crate) fn init_after_heap() {
 
     INFO.call_once(|| BootInfo {
         bootloader_name: boot_time_info.bootloader_name.to_string(),
-        kernel_cmdline: boot_time_info.kernel_cmdline.to_string(),
+        kernel_cmdline: extract_asterinas_wrapped_cmdline(boot_time_info.kernel_cmdline)
+            .to_string(),
         initramfs: boot_time_info.initramfs,
         framebuffer_arg: boot_time_info.framebuffer_arg,
         memory_regions: boot_time_info.memory_regions.to_vec(),
