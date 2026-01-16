@@ -20,6 +20,8 @@ use std::{
     time::SystemTime,
 };
 
+use crate::bundle::bin::AsterBinType;
+use crate::config::scheme::BootProtocol;
 use crate::{
     arch::Arch,
     config::{
@@ -148,6 +150,15 @@ impl Bundle {
                 if self.manifest.aster_bin.is_none() {
                     return Err("Kernel binary is required for direct QEMU booting".to_owned());
                 };
+
+                let aster_bin_type = self.manifest.aster_bin.as_ref().unwrap().typ();
+                let expects_linux = matches!(aster_bin_type, AsterBinType::BzImage(_));
+                let actual_linux = config_action.grub.boot_protocol == BootProtocol::Linux;
+                if expects_linux != actual_linux {
+                    return Err(
+                        "The boot protocol is not compatible with the kernel binary".to_owned()
+                    );
+                }
             }
             BootMethod::GrubRescueIso => {
                 let Some(ref vm_image) = self.manifest.vm_image else {
