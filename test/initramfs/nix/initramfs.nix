@@ -5,6 +5,10 @@ let
     root = ./../src/etc;
     fileset = ./../src/etc;
   };
+  st_dir = lib.fileset.toSource {
+    root = ./../st;
+    fileset = ./../st;
+  };
   gvisor_libs = if syscall != null && syscall.testSuite == "gvisor" then
     builtins.path {
       name = "gvisor-libs";
@@ -30,6 +34,10 @@ in stdenvNoCC.mkDerivation {
     ln -sfn usr/sbin $out/sbin
     ln -sfn usr/lib $out/lib
     ln -sfn usr/lib64 $out/lib64
+
+    mkdir -p $out/st
+    cp -r ${st_dir}/* $out/st/
+
     cp -r ${busybox}/bin/* $out/bin/
     ${lib.optionalString is_evtest_included ''
       cp -r ${pkgs.evtest}/bin/* $out/bin/
