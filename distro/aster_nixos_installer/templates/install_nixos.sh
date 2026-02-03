@@ -117,6 +117,8 @@ mkdir -p ${BUILD_DIR}/boot
 mkdir -p ${BUILD_DIR}/etc/nixos
 mount -o umask=077,sync,dirsync "${BOOT_DEVICE}" ${BUILD_DIR}/boot
 
+mkdir -p "${BUILD_DIR}/st"
+
 echo "${BUILD_DIR} is mounted successfully!"
 
 cleanup() {
@@ -130,6 +132,7 @@ cp $CONFIG_PATH ${BUILD_DIR}/etc/nixos/configuration.nix
 cp @aster-configuration@ ${BUILD_DIR}/etc/nixos/aster_configuration.nix
 cp -r @aster-etc-nixos@/modules ${BUILD_DIR}/etc/nixos
 cp -r @aster-etc-nixos@/overlays ${BUILD_DIR}/etc/nixos
+cp -a @aster-st-nixos@/. "${BUILD_DIR}/st/"
 
 export PATH=${PATH}:/run/current-system/sw/bin
 nixos-install --root ${BUILD_DIR} --no-root-passwd \

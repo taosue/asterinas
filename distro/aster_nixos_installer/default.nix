@@ -7,6 +7,7 @@ let
     path = ../../target/osdk/iso_root/boot/aster-kernel-osdk-bin;
   };
   etc-nixos = builtins.path { path = ../etc_nixos; };
+  st-nixos = builtins.path { path = ../st; };
 
   aster_configuration = pkgs.replaceVarsWith {
     src = ./templates/aster_configuration.nix;
@@ -27,6 +28,7 @@ let
       aster-etc-nixos = etc-nixos;
       aster-substituters = extra-substituters;
       aster-trusted-public-keys = extra-trusted-public-keys;
+      aster-st-nixos = st-nixos;
     };
     isExecutable = true;
   };
