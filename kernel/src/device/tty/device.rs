@@ -6,8 +6,8 @@
 //!
 //! Reference: <https://www.kernel.org/doc/html/latest/admin-guide/devices.html>
 
-use aster_cmdline::KCMDLINE;
 use device_id::{DeviceId, MajorId, MinorId};
+use ostd::{boot::cmdline::FromKernelParam, sync::Mutex};
 use spin::Once;
 
 use super::n_tty::tty1_device;
@@ -104,13 +104,7 @@ impl SystemConsole {
 
         INSTANCE.call_once(|| {
             // TODO: Support specifying multiple TTY devices, e.g., "console=hvc0 console=tty0".
-            let console_name = KCMDLINE
-                .get()
-                .unwrap()
-                .get_console_names()
-                .first()
-                .map(String::as_str)
-                .unwrap_or("tty0");
+            let console_name = CONSOLES.lock().first().map_or("tty0", |c| c.console);
 
             let device = match console_name {
                 "tty0" => Some(Arc::new(Tty0Device) as _),
@@ -161,3 +155,16 @@ pub(super) fn init_in_first_process() -> Result<()> {
 
     Ok(())
 }
+
+struct Console {
+    console: &'static str,
+}
+
+impl FromKernelParam for Console {
+    fn from_value(value: Option<&'static str>) -> Option<Self> {
+        value.map(|console| Self { console })
+    }
+}
+
+static CONSOLES: Mutex<Vec<Console>> = Mutex::new(Vec::new());
+aster_cmdline::kernel_param_vec!("console=", CONSOLES);
