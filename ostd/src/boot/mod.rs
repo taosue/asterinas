@@ -11,6 +11,7 @@
     expect(dead_code)
 )]
 
+pub mod cmdline;
 pub mod memory_region;
 pub mod smp;
 

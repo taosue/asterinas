@@ -4,7 +4,7 @@
 
 use aster_cmdline::KCMDLINE;
 use component::InitStage;
-use ostd::{cpu::CpuId, util::id_set::Id};
+use ostd::{boot::cmdline::FromKernelParam, cpu::CpuId, util::id_set::Id};
 use spin::once::Once;
 
 use crate::{
@@ -144,8 +144,11 @@ fn first_kthread() {
 
     INIT_PROCESS.call_once(|| {
         let karg = KCMDLINE.get().unwrap();
+        let init_path = INIT_PROC_PATH
+            .get()
+            .expect("Init process path not specified.");
         spawn_init_process(
-            karg.get_initproc_path().unwrap(),
+            init_path.path,
             karg.get_initproc_argv().to_vec(),
             karg.get_initproc_envp().to_vec(),
         )
@@ -179,3 +182,16 @@ pub(crate) fn on_first_process_startup(ctx: &Context) {
     crate::fs::init_in_first_process(ctx);
     crate::process::init_in_first_process(ctx);
 }
+
+struct InitProcPath {
+    pub path: &'static str,
+}
+
+impl FromKernelParam for InitProcPath {
+    fn from_value(value: Option<&'static str>) -> Option<Self> {
+        value.map(|path| Self { path })
+    }
+}
+
+static INIT_PROC_PATH: Once<InitProcPath> = Once::new();
+aster_cmdline::kernel_param!("init=", INIT_PROC_PATH);

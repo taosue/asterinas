@@ -82,6 +82,13 @@ SECTIONS
         __sensitive_io_ports_end = .;
     }
 
+    .kernel_param           : AT(ADDR(.kernel_param) - KERNEL_VMA) {
+        __kernel_param_start = .;
+        KEEP(*(SORT(.kernel_param)))
+        KEEP(*(.kernel_param .kernel_param.*))
+        __kernel_param_end = .;
+    } : rodata
+
     .data                   : AT(ADDR(.data) - KERNEL_VMA_OFFSET) {
         *(.data .data.*)
     }
