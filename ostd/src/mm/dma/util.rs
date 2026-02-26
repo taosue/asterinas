@@ -111,7 +111,7 @@ pub(super) fn alloc_kva(
     let mut flusher = TlbFlusher::new(&target_cpus, disable_preempt());
     flusher.issue_tlb_flush(TlbFlushOp::for_range(kva.range()));
     flusher.dispatch_tlb_flush();
-    flusher.sync_tlb_flush();
+    //flusher.sync_tlb_flush();
 
     Ok((kva, paddr))
 }
