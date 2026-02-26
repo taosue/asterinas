@@ -330,7 +330,9 @@ impl OverlayInode {
             visitor.visit(name, *ino, *type_, *offset)?;
         }
 
-        Ok(overlay_dir_visitor.cur_offset())
+        Ok(overlay_dir_visitor
+            .cur_offset()
+            .map_or(0, |off| off - offset + 1))
     }
 
     /// Deletes the target file by creating a "whiteout" file from the upper layer.
@@ -994,9 +996,11 @@ struct OverlayDirVisitor {
 
 impl DirentVisitor for OverlayDirVisitor {
     fn visit(&mut self, name: &str, fs_ino: u64, type_: InodeType, fs_offset: usize) -> Result<()> {
-        if self.whiteout_only_mode && name.starts_with(WHITEOUT_PREFIX) {
-            self.dir_set
-                .insert(name[WHITEOUT_PREFIX_SIZE..].to_string());
+        if self.whiteout_only_mode {
+            if name.starts_with(WHITEOUT_PREFIX) {
+                self.dir_set
+                    .insert(name[WHITEOUT_PREFIX_SIZE..].to_string());
+            }
             return Ok(());
         }
 
@@ -1052,11 +1056,8 @@ impl OverlayDirVisitor {
         !self.whiteout_set.is_empty()
     }
 
-    pub fn cur_offset(&self) -> usize {
-        self.dir_map
-            .last_key_value()
-            .map(|(off, _)| *off)
-            .unwrap_or(0)
+    pub fn cur_offset(&self) -> Option<usize> {
+        self.dir_map.last_key_value().map(|(off, _)| *off)
     }
 
     fn set_cur_layer(&mut self, layer: LayerIdx) {
