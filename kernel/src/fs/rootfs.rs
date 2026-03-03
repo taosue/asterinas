@@ -97,7 +97,18 @@ pub fn init_in_first_kthread(path_resolver: &PathResolver) -> Result<()> {
                 };
                 path.inode().write_link(&link_content)?;
             }
+            FileType::Char => {
+                ostd::early_println!("[kernel] need to create char device, entry name = {:?}", entry_name);
+            }
+            FileType::Block => {
+                ostd::early_println!("[kernel] need to create block device, entry name = {:?}", entry_name);
+            }
             type_ => {
+                ostd::early_println!(
+                    "[kernel] unsupported file type = {:?} in initramfs, entry name = {:?}",
+                    type_,
+                    entry_name
+                );
                 panic!("unsupported file type = {:?} in initramfs", type_);
             }
         }
