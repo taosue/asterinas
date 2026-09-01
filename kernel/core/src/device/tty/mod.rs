@@ -5,7 +5,7 @@ use ostd::sync::LocalIrqDisabled;
 
 use self::{line_discipline::LineDiscipline, termio::CFontOp};
 use crate::{
-    device::{Device, DeviceType},
+    device::{DevNode, DeviceType},
     events::IoEvents,
     fs::{
         devtmpfs::DevtmpfsNodeMeta,
@@ -348,7 +348,7 @@ impl<D: TtyDriver> Terminal for Tty<D> {
     }
 }
 
-impl<D: TtyDriver> Device for Tty<D> {
+impl<D: TtyDriver> DevNode for Tty<D> {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }

@@ -18,8 +18,8 @@ use crate::{
     prelude::*,
 };
 
-/// The abstraction of a device.
-pub(crate) trait Device: Send + Sync + 'static {
+/// A devtmpfs endpoint associated with a registered device.
+pub(crate) trait DevNode: Send + Sync + 'static {
     /// Returns the device type.
     fn type_(&self) -> DeviceType;
 
@@ -34,9 +34,9 @@ pub(crate) trait Device: Send + Sync + 'static {
     fn open(&self) -> Result<Box<dyn PerOpenFileOps>>;
 }
 
-impl Debug for dyn Device {
+impl Debug for dyn DevNode {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        f.debug_struct("Device")
+        f.debug_struct("DevNode")
             .field("type", &self.type_())
             .field("id", &self.id())
             .field("devtmpfs_meta", &self.devtmpfs_meta())

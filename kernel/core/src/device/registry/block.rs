@@ -10,7 +10,7 @@ use ostd::mm::VmIo;
 
 use crate::{
     context::current_userspace,
-    device::{Device, DeviceType},
+    device::{DevNode, DeviceType},
     events::IoEvents,
     fs::{
         devtmpfs::{self, DevtmpfsNode, DevtmpfsNodeMeta},
@@ -62,7 +62,7 @@ pub(super) fn init_in_first_kthread() {
 
 pub(super) fn init_in_first_process() -> Result<()> {
     for device in aster_block::collect_all() {
-        let device: Arc<dyn Device> = Arc::new(BlockFile::new(device));
+        let device: Arc<dyn DevNode> = Arc::new(BlockFile::new(device));
         if let Some(meta) = device.devtmpfs_meta() {
             devtmpfs::create_node(DevtmpfsNode::new(device.type_(), device.id(), meta))?;
         }
@@ -109,7 +109,7 @@ impl BlockFile {
     }
 }
 
-impl Device for BlockFile {
+impl DevNode for BlockFile {
     fn type_(&self) -> DeviceType {
         DeviceType::Block
     }
@@ -245,7 +245,7 @@ impl PerOpenFileOps for OpenBlockFile {
     }
 }
 
-pub(super) fn lookup(id: DeviceId) -> Option<Arc<dyn Device>> {
+pub(super) fn lookup(id: DeviceId) -> Option<Arc<dyn DevNode>> {
     let block_device = aster_block::lookup(id)?;
 
     let mut registry = DEVICE_REGISTRY.lock();
@@ -258,4 +258,4 @@ pub(super) fn lookup(id: DeviceId) -> Option<Arc<dyn Device>> {
 
 // TODO: Merge the two mapping tables, one is here and the other is in the block component.
 // Maintaining two mapping tables is undesirable due to duplication and (potential) inconsistency.
-static DEVICE_REGISTRY: Mutex<BTreeMap<u32, Arc<dyn Device>>> = Mutex::new(BTreeMap::new());
+static DEVICE_REGISTRY: Mutex<BTreeMap<u32, Arc<dyn DevNode>>> = Mutex::new(BTreeMap::new());

@@ -54,7 +54,7 @@ use tdx_guest::{
 };
 
 use crate::{
-    device::{Device, DeviceType, registry::char::register},
+    device::{DevNode, DeviceType, registry::char::register},
     events::IoEvents,
     fs::{
         devtmpfs::DevtmpfsNodeMeta,
@@ -84,7 +84,7 @@ impl TdxGuest {
     }
 }
 
-impl Device for TdxGuest {
+impl DevNode for TdxGuest {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }

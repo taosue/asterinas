@@ -7,7 +7,7 @@ use core::time::Duration;
 
 use super::{BLOCK_SIZE, DevPts, FIRST_SLAVE_INO};
 use crate::{
-    device::{Device, PtySlave},
+    device::{DevNode, PtySlave},
     fs::{
         file::{AccessMode, InodeMode, InodeType, PerOpenFileOps, StatusFlags, mkmod},
         vfs::{

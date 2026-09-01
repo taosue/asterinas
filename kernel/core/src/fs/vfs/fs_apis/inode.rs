@@ -14,7 +14,7 @@ use super::{
     xattr::{XattrName, XattrNamespace, XattrSetFlags},
 };
 use crate::{
-    device::{Device, DeviceType},
+    device::{DevNode, DeviceType},
     fs::{
         file::{AccessMode, InodeMode, InodeType, PerOpenFileOps, Permission, StatusFlags},
         utils::DirentVisitor,
@@ -227,7 +227,7 @@ impl Metadata {
         ino: u64,
         mode: InodeMode,
         blk_size: usize,
-        device: &dyn Device,
+        device: &dyn DevNode,
         container_dev_id: DeviceId,
     ) -> Self {
         let now = RealTimeCoarseClock::get().read_time();

@@ -7,7 +7,7 @@ use aster_framebuffer::{
 use device_id::{DeviceId, MajorId, MinorId};
 use ostd::mm::{HasPaddr, HasSize, VmIo};
 
-use super::{Device, DeviceType, registry::char};
+use super::{DevNode, DeviceType, registry::char};
 use crate::{
     context::current_userspace,
     events::IoEvents,
@@ -218,7 +218,7 @@ mod ioctl_defs {
     pub(super) type Blank            = ioc!(FBIOBLANK,           0x4611, NoData);
 }
 
-impl Device for Fb {
+impl DevNode for Fb {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }

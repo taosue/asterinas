@@ -28,7 +28,7 @@ use file::{
 use spin::Once;
 
 use super::{
-    Device, DeviceType,
+    DevNode, DeviceType,
     registry::char::{MajorIdOwner, acquire_major, register, unregister},
 };
 use crate::{
@@ -191,7 +191,7 @@ impl InputHandler for EvdevDevice {
     }
 }
 
-impl Device for EvdevDevice {
+impl DevNode for EvdevDevice {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }

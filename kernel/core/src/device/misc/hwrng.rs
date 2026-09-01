@@ -9,7 +9,7 @@ use aster_virtio::device::entropy::{self, device::EntropyDevice};
 use device_id::{DeviceId, MinorId};
 
 use crate::{
-    device::{Device, DeviceType, registry::char},
+    device::{DevNode, DeviceType, registry::char},
     events::IoEvents,
     fs::{
         devtmpfs::DevtmpfsNodeMeta,
@@ -44,7 +44,7 @@ impl HwRngDevice {
     }
 }
 
-impl Device for HwRngDevice {
+impl DevNode for HwRngDevice {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }

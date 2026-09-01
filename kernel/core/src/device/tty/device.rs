@@ -11,7 +11,7 @@ use spin::Once;
 
 use crate::{
     device::{
-        Device, DeviceType,
+        DevNode, DeviceType,
         registry::char,
         tty::{hvc::hvc0_device, serial::serial0_device, vt::active_vt},
     },
@@ -26,7 +26,7 @@ use crate::{
 /// terminal.
 pub(crate) struct Tty0Device;
 
-impl Device for Tty0Device {
+impl DevNode for Tty0Device {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }
@@ -48,7 +48,7 @@ impl Device for Tty0Device {
 /// of the session of the current process.
 pub(crate) struct TtyDevice;
 
-impl Device for TtyDevice {
+impl DevNode for TtyDevice {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }
@@ -77,7 +77,7 @@ impl Device for TtyDevice {
 /// Corresponds to `/dev/console` in the file system. This device represents a console to which
 /// system messages will be sent.
 pub(crate) struct SystemConsole {
-    inner: Arc<dyn Device>,
+    inner: Arc<dyn DevNode>,
 }
 
 /// The device ID of `/dev/console`.
@@ -114,7 +114,7 @@ impl SystemConsole {
     }
 }
 
-impl Device for SystemConsole {
+impl DevNode for SystemConsole {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }

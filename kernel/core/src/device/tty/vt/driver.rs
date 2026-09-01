@@ -11,7 +11,7 @@ use ostd::mm::VmIo;
 use crate::{
     context::current_userspace,
     device::{
-        Device,
+        DevNode,
         tty::{
             CFontOp, Tty, TtyDriver,
             termio::CTermios,

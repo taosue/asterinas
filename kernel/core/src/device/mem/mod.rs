@@ -26,7 +26,7 @@ pub(crate) use file::{getrandom, geturandom};
 use spin::Once;
 
 use super::{
-    Device, DeviceType,
+    DevNode, DeviceType,
     registry::char::{MajorIdOwner, acquire_major, register},
 };
 use crate::{
@@ -56,7 +56,7 @@ impl MemDevice {
     }
 }
 
-impl Device for MemDevice {
+impl DevNode for MemDevice {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }

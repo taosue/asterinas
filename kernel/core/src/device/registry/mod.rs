@@ -3,7 +3,7 @@
 use device_id::DeviceId;
 
 use crate::{
-    device::{Device, DeviceType},
+    device::{DevNode, DeviceType},
     prelude::*,
 };
 
@@ -20,7 +20,7 @@ pub(super) fn init_in_first_process() -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn lookup(device_type: DeviceType, device_id: DeviceId) -> Option<Arc<dyn Device>> {
+pub(crate) fn lookup(device_type: DeviceType, device_id: DeviceId) -> Option<Arc<dyn DevNode>> {
     match device_type {
         DeviceType::Char => char::lookup(device_id),
         DeviceType::Block => block::lookup(device_id),

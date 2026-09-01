@@ -2,7 +2,7 @@
 
 use super::{JobControl, Pgid, Process, Session, session::SessionGuard};
 use crate::{
-    device::Device,
+    device::DevNode,
     prelude::*,
     process::pid_table,
     util::ioctl::{RawIoctl, dispatch_ioctl},
@@ -12,7 +12,7 @@ use crate::{
 ///
 /// We currently support two kinds of terminal, the TTY and pty. They're associated with a
 /// `JobControl` to track the session and the foreground process group.
-pub(crate) trait Terminal: Device {
+pub(crate) trait Terminal: DevNode {
     /// Returns the job control of the terminal.
     fn job_control(&self) -> &JobControl;
 }

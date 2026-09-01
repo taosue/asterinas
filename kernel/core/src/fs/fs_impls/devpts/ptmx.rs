@@ -6,7 +6,7 @@ use device_id::{DeviceId, MajorId, MinorId};
 
 use super::{BLOCK_SIZE, DevPts, PTMX_INO};
 use crate::{
-    device::{Device, DeviceType},
+    device::{DevNode, DeviceType},
     fs::{
         devtmpfs::DevtmpfsNodeMeta,
         file::{AccessMode, InodeMode, InodeType, PerOpenFileOps, StatusFlags, mkmod},
@@ -171,7 +171,7 @@ impl Inode for Ptmx {
     }
 }
 
-impl Device for Inner {
+impl DevNode for Inner {
     fn type_(&self) -> DeviceType {
         DeviceType::Char
     }

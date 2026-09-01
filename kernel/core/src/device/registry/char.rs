@@ -7,15 +7,15 @@ use core::ops::Range;
 use device_id::{DeviceId, MajorId};
 
 use crate::{
-    device::Device,
+    device::DevNode,
     fs::devtmpfs::{self, DevtmpfsNode},
     prelude::*,
 };
 
-static DEVICE_REGISTRY: Mutex<BTreeMap<u32, Arc<dyn Device>>> = Mutex::new(BTreeMap::new());
+static DEVICE_REGISTRY: Mutex<BTreeMap<u32, Arc<dyn DevNode>>> = Mutex::new(BTreeMap::new());
 
 /// Registers a new char device.
-pub(crate) fn register(device: Arc<dyn Device>) -> Result<()> {
+pub(crate) fn register(device: Arc<dyn DevNode>) -> Result<()> {
     let mut registry = DEVICE_REGISTRY.lock();
     let id = device.id().to_raw();
     if registry.contains_key(&id) {
@@ -34,7 +34,7 @@ pub(crate) fn register(device: Arc<dyn Device>) -> Result<()> {
 }
 
 /// Unregisters an existing char device, returning the device if found.
-pub(crate) fn unregister(id: DeviceId) -> Result<Arc<dyn Device>> {
+pub(crate) fn unregister(id: DeviceId) -> Result<Arc<dyn DevNode>> {
     let mut registry = DEVICE_REGISTRY.lock();
     let device = registry
         .remove(&id.to_raw())
@@ -53,7 +53,7 @@ pub(crate) fn unregister(id: DeviceId) -> Result<Arc<dyn Device>> {
 }
 
 /// Looks up a char device of a given device ID.
-pub(super) fn lookup(id: DeviceId) -> Option<Arc<dyn Device>> {
+pub(super) fn lookup(id: DeviceId) -> Option<Arc<dyn DevNode>> {
     DEVICE_REGISTRY.lock().get(&id.to_raw()).cloned()
 }
 
