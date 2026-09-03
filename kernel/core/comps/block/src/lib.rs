@@ -48,10 +48,15 @@ mod prelude;
 pub mod request_queue;
 
 use ::device_id::DeviceId;
+use aster_device::{Class, register_class};
+use aster_systree::{
+    BranchNodeFields, SysAttrSet, SysBranchNode, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
+};
 use component::{ComponentInitError, init_component};
 pub use device_id::{EXTENDED_DEVICE_ID_ALLOCATOR, MajorIdOwner, acquire_major, allocate_major};
 use ostd::sync::Mutex;
 pub use partition::{PartitionInfo, PartitionNode};
+use spin::Once;
 
 use self::{
     bio::{BioEnqueueError, SubmittedBio},
@@ -87,6 +92,59 @@ pub trait BlockDevice: Send + Sync + Any + Debug {
         None
     }
 }
+
+/// A block device that can be attached to the device tree.
+pub trait AnyBlockDevice: BlockDevice + SysBranchNode {}
+
+const BLOCK_CLASS_NAME: &str = "block";
+
+/// The block device class under `/sys/class/block`.
+#[derive(Debug)]
+pub struct BlockClass {
+    fields: BranchNodeFields<dyn SysObj, Self>,
+}
+
+impl BlockClass {
+    fn new() -> Arc<Self> {
+        Arc::new_cyclic(|weak_self| Self {
+            fields: BranchNodeFields::new(
+                SysStr::from(BLOCK_CLASS_NAME),
+                SysAttrSet::new_empty(),
+                weak_self.clone(),
+            ),
+        })
+    }
+
+    fn add_device_link(&self, name: SysStr, path: &str) -> aster_systree::Result<()> {
+        self.fields
+            .add_child(aster_device::ClassDeviceLink::new(name, path))
+    }
+}
+
+impl Class for BlockClass {
+    type Device = dyn AnyBlockDevice;
+
+    fn name() -> &'static str {
+        BLOCK_CLASS_NAME
+    }
+
+    fn register(device: Arc<Self::Device>) -> aster_systree::Result<()> {
+        let class = BLOCK_CLASS.get().unwrap();
+        let name = SysStr::from(String::from(BlockDevice::name(device.as_ref())));
+        let path = device.path();
+
+        register(device).map_err(|_| aster_systree::Error::AlreadyExists)?;
+        class.add_device_link(name, path.as_ref())
+    }
+}
+
+inherit_sys_branch_node!(BlockClass, fields, {
+    fn perms(&self) -> SysPerms {
+        SysPerms::DEFAULT_RO_PERMS
+    }
+});
+
+static BLOCK_CLASS: Once<Arc<BlockClass>> = Once::new();
 
 /// Metadata for a block device.
 #[derive(Clone, Copy, Debug, Default)]
@@ -179,6 +237,7 @@ static DEVICE_REGISTRY: Mutex<BTreeMap<u32, Arc<dyn BlockDevice>>> = Mutex::new(
 #[init_component]
 fn init() -> Result<(), ComponentInitError> {
     device_id::init();
+    BLOCK_CLASS.call_once(|| register_class(BlockClass::new()).unwrap());
 
     Ok(())
 }

@@ -271,8 +271,8 @@ impl<T: SysSymlink> SymlinkNodeFields<T> {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! _inner_impl_sys_node {
-    ($struct_name:ident, $field:ident, $helper_trait:ty) => {
-        impl $crate::SysNode for $struct_name {
+    ([$($impl_generics:tt)*], $struct_name:ty, $field:ident, $helper_trait:ty) => {
+        impl $($impl_generics)* $crate::SysNode for $struct_name {
             fn node_attrs(&self) -> &$crate::SysAttrSet {
                 self.$field.attr_set()
             }
@@ -463,7 +463,12 @@ macro_rules! inherit_sys_leaf_node {
             }
         }
 
-        $crate::_inner_impl_sys_node!($struct_name, $field, $crate::_InheritSysLeafNode<$struct_name>);
+        $crate::_inner_impl_sys_node!(
+            [],
+            $struct_name,
+            $field,
+            $crate::_InheritSysLeafNode<$struct_name>
+        );
     };
 }
 
@@ -545,10 +550,31 @@ pub trait _InheritSysBranchNode<T: SysBranchNode> {
 ///   } // Override the `perms` and `create_child` methods.
 /// }
 /// ```
+#[doc(hidden)]
 #[macro_export]
-macro_rules! inherit_sys_branch_node {
-    ($struct_name:ident, $field:ident, {$($fn_override:item)*}) => {
-        impl $crate::_InheritSysBranchNode<$struct_name> for $struct_name {
+macro_rules! __sys_obj_from_child {
+    (direct, $child:expr) => {
+        Some($child.clone() as alloc::sync::Arc<dyn $crate::SysObj>)
+    };
+
+    (node, $child:expr) => {
+        $child
+            .cast_to_node()
+            .map(|node| node as alloc::sync::Arc<dyn $crate::SysObj>)
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __inherit_sys_branch_node_impl {
+    (
+        [$($impl_generics:tt)*],
+        $struct_name:ty,
+        $field:ident,
+        $child_mode:ident,
+        {$($fn_override:item)*}
+    ) => {
+        impl $($impl_generics)* $crate::_InheritSysBranchNode<$struct_name> for $struct_name {
             fn field(&self) -> &$crate::ObjFields<$struct_name> {
                 &self.$field.obj_field()
             }
@@ -556,7 +582,7 @@ macro_rules! inherit_sys_branch_node {
             $($fn_override)*
         }
 
-        impl $crate::SysObj for $struct_name {
+        impl $($impl_generics)* $crate::SysObj for $struct_name {
             fn as_any(&self) -> &dyn core::any::Any {
                 self
             }
@@ -600,14 +626,19 @@ macro_rules! inherit_sys_branch_node {
             }
         }
 
-        $crate::_inner_impl_sys_node!($struct_name, $field, $crate::_InheritSysBranchNode<$struct_name>);
+        $crate::_inner_impl_sys_node!(
+            [$($impl_generics)*],
+            $struct_name,
+            $field,
+            $crate::_InheritSysBranchNode<$struct_name>
+        );
 
-        impl $crate::SysBranchNode for $struct_name {
+        impl $($impl_generics)* $crate::SysBranchNode for $struct_name {
             fn visit_child_with(&self, name: &str, f: &mut dyn FnMut(Option<&alloc::sync::Arc<dyn $crate::SysObj>>)) {
                 let children_guard = self.$field.children_ref().read();
                 let child = children_guard
                     .get(name)
-                    .map(|child| child.clone() as alloc::sync::Arc<dyn $crate::SysObj>);
+                    .and_then(|child| $crate::__sys_obj_from_child!($child_mode, child));
 
                 f(child.as_ref())
             }
@@ -623,7 +654,9 @@ macro_rules! inherit_sys_branch_node {
                         continue;
                     }
 
-                    let child = child_arc.clone() as alloc::sync::Arc<dyn $crate::SysObj>;
+                    let Some(child) = $crate::__sys_obj_from_child!($child_mode, child_arc) else {
+                        continue;
+                    };
                     if f(&child).is_none() {
                         break;
                     }
@@ -633,7 +666,7 @@ macro_rules! inherit_sys_branch_node {
             fn child(&self, name: &str) -> Option<Arc<dyn $crate::SysObj>> {
                 self.$field
                     .child(name)
-                    .map(|child| child as Arc<dyn $crate::SysObj>)
+                    .and_then(|child| $crate::__sys_obj_from_child!($child_mode, child))
             }
 
             fn create_child(&self, name: &str) -> $crate::Result<alloc::sync::Arc<dyn $crate::SysObj>> {
@@ -641,11 +674,29 @@ macro_rules! inherit_sys_branch_node {
             }
 
             fn remove_child(&self, name: &str) -> $crate::Result<alloc::sync::Arc<dyn $crate::SysObj>> {
-                self.$field
-                    .remove_child(name)
-                    .map(|child| child as Arc<dyn $crate::SysObj>)
+                self.$field.remove_child(name).and_then(|child| {
+                    $crate::__sys_obj_from_child!($child_mode, child)
+                        .ok_or($crate::Error::InvalidOperation)
+                })
             }
         }
+    };
+}
+
+#[macro_export]
+macro_rules! inherit_sys_branch_node {
+    ($struct_name:ident<$($generic:ident : $bound:path),+>, $field:ident, {$($fn_override:item)*}) => {
+        $crate::__inherit_sys_branch_node_impl!(
+            [<$($generic: $bound),+>],
+            $struct_name<$($generic),+>,
+            $field,
+            node,
+            {$($fn_override)*}
+        );
+    };
+
+    ($struct_name:ident, $field:ident, {$($fn_override:item)*}) => {
+        $crate::__inherit_sys_branch_node_impl!([], $struct_name, $field, direct, {$($fn_override)*});
     };
 }
 

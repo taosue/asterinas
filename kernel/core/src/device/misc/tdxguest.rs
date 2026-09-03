@@ -40,6 +40,9 @@
 
 use core::{mem::offset_of, time::Duration};
 
+use aster_systree::{
+    BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
+};
 use aster_util::{field_ptr, safe_ptr::SafePtr};
 use device_id::{DeviceId, MinorId};
 use ostd::{
@@ -53,8 +56,9 @@ use tdx_guest::{
     tdvmcall::{self, TdVmcallError},
 };
 
+use super::{AnyMiscDevice, MiscClass};
 use crate::{
-    device::{DevNode, DeviceType, registry::char::register},
+    device::{DevNode, DeviceType, registry::char::register, virtual_bus},
     events::IoEvents,
     fs::{
         devtmpfs::DevtmpfsNodeMeta,
@@ -63,6 +67,7 @@ use crate::{
     },
     prelude::*,
     process::signal::{PollHandle, Pollable},
+    security::tsm_mr,
     util::ioctl::{RawIoctl, dispatch_ioctl},
 };
 
@@ -71,16 +76,33 @@ const TDX_GUEST_MINOR: u32 = 0x7b;
 /// The `/dev/tdx_guest` device.
 #[derive(Debug)]
 pub(crate) struct TdxGuest {
+    fields: BranchNodeFields<dyn SysObj, Self>,
     id: DeviceId,
 }
 
 impl TdxGuest {
-    pub(crate) fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Result<Arc<Self>> {
         let major = super::MISC_MAJOR.get().unwrap().get();
         let minor = MinorId::new(TDX_GUEST_MINOR);
 
-        let id = DeviceId::new(major, minor);
-        Arc::new(Self { id })
+        let dev = Arc::new_cyclic(|weak_self| {
+            let fields = BranchNodeFields::new(
+                SysStr::from("tdx_guest"),
+                SysAttrSet::new_empty(),
+                weak_self.clone(),
+            );
+            fields.add_child(tsm_mr::measurements_node()).unwrap();
+            Self {
+                fields,
+                id: DeviceId::new(major, minor),
+            }
+        });
+        virtual_bus::register_class_device::<MiscClass>(dev.clone())?;
+
+        register(dev.clone())?;
+        let dev_node: &dyn DevNode = dev.as_ref();
+        aster_device::register_dev_node(dev.path().as_ref(), dev_node.type_(), dev_node.id())?;
+        Ok(dev)
     }
 }
 
@@ -101,6 +123,14 @@ impl DevNode for TdxGuest {
         Ok(Box::new(TdxGuestFile))
     }
 }
+
+impl AnyMiscDevice for TdxGuest {}
+
+inherit_sys_branch_node!(TdxGuest, fields, {
+    fn perms(&self) -> SysPerms {
+        SysPerms::DEFAULT_RO_PERMS
+    }
+});
 
 impl From<TdCallError> for Error {
     fn from(err: TdCallError) -> Self {
@@ -374,7 +404,7 @@ pub(super) fn init() -> Result<()> {
         RwMutex::new(report)
     });
     refresh_tdx_report(None)?;
-    register(TdxGuest::new())?;
+    TdxGuest::new()?;
     Ok(())
 }
 

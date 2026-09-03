@@ -3,7 +3,6 @@
 #![no_std]
 #![deny(unsafe_code)]
 #![feature(trait_alias)]
-
 mod buffer;
 pub mod dma_pool;
 mod driver;
@@ -12,16 +11,26 @@ extern crate alloc;
 #[macro_use]
 extern crate ostd_pod;
 
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
-use core::{any::Any, fmt::Debug};
+use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
+use core::{
+    any::Any,
+    fmt::Debug,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use aster_bigtcp::device::DeviceCapabilities;
+use aster_device::{Class, register_class};
 use aster_softirq::{
     BottomHalfDisabled, SoftIrqLine,
     softirq_id::{NETWORK_RX_SOFTIRQ_ID, NETWORK_TX_SOFTIRQ_ID},
 };
+use aster_systree::{
+    BranchNodeFields, Result as SysResult, SysAttrSet, SysBranchNode, SysObj, SysPerms, SysStr,
+    inherit_sys_branch_node,
+};
 pub use buffer::{RxBuffer, TxBuffer, TxBufferBuilder};
 use component::{ComponentInitError, init_component};
+pub use driver::NetworkDeviceAdapter;
 use ostd::sync::SpinLock;
 use spin::Once;
 
@@ -36,7 +45,66 @@ pub enum NetError {
     NoMemory,
 }
 
-pub trait AnyNetworkDevice: Send + Sync + Any + Debug {
+static NETWORK_CLASS: Once<Arc<NetworkClass>> = Once::new();
+
+const NETWORK_CLASS_NAME: &str = "net";
+
+/// The network device class under `/sys/class/net`.
+pub struct NetworkClass {
+    fields: BranchNodeFields<dyn SysObj, Self>,
+    devices: SpinLock<BTreeMap<String, NetworkDeviceIrqCallbackSet>, BottomHalfDisabled>,
+}
+
+impl NetworkClass {
+    fn new() -> Arc<Self> {
+        Arc::new_cyclic(|weak_self| Self {
+            fields: BranchNodeFields::new(
+                SysStr::from(NETWORK_CLASS_NAME),
+                SysAttrSet::new_empty(),
+                weak_self.clone(),
+            ),
+            devices: SpinLock::new(BTreeMap::new()),
+        })
+    }
+
+    /// Returns the registered network class.
+    fn class() -> &'static Self {
+        NETWORK_CLASS.get().unwrap().as_ref()
+    }
+
+    fn add_device_link(&self, name: SysStr, path: &str) -> SysResult<()> {
+        self.fields
+            .add_child(aster_device::ClassDeviceLink::new(name, path))
+    }
+}
+
+impl Class for NetworkClass {
+    type Device = dyn AnyNetworkDevice;
+
+    fn name() -> &'static str {
+        NETWORK_CLASS_NAME
+    }
+
+    fn register(device: Arc<Self::Device>) -> SysResult<()> {
+        let class = NETWORK_CLASS.get().unwrap();
+        let name = device.name().clone();
+        let path = device.path();
+        class.add_device_link(name, path.as_ref())?;
+        class.devices.lock().insert(
+            device.name().clone().into_owned(),
+            NetworkDeviceIrqCallbackSet::new(device),
+        );
+        Ok(())
+    }
+}
+
+inherit_sys_branch_node!(NetworkClass, fields, {
+    fn perms(&self) -> SysPerms {
+        SysPerms::DEFAULT_RO_PERMS
+    }
+});
+
+pub trait AnyNetworkDevice: SysBranchNode + Send + Sync + Any + Debug {
     // ================Device Information=================
 
     fn mac_addr(&self) -> EthernetAddr;
@@ -49,40 +117,30 @@ pub trait AnyNetworkDevice: Send + Sync + Any + Debug {
 
     /// Receives a packet from network. If packet is ready, returns a `RxBuffer` containing the packet.
     /// Otherwise, return [`NetError::NotReady`].
-    fn receive(&mut self) -> Result<RxBuffer, NetError>;
+    fn receive(&self) -> Result<RxBuffer, NetError>;
 
     /// Sends a packet to network.
-    fn send(&mut self, packet: &[u8]) -> Result<(), NetError>;
+    fn send(&self, packet: &[u8]) -> Result<(), NetError>;
 
     /// Frees processes tx buffers.
-    fn free_processed_tx_buffers(&mut self);
+    fn free_processed_tx_buffers(&self);
 
     /// Notifies the device driver that a polling operation has ended.
     ///
     /// The driver can assume that the device remains protected by acquiring a poll lock
     /// for the entire duration of the polling process.
     /// Thus two polling process cannot happen simultaneously.
-    fn notify_poll_end(&mut self);
+    fn notify_poll_end(&self);
 }
 
 pub trait NetDeviceCallback = Fn() + Send + Sync + 'static;
 
-pub fn register_device(
-    name: String,
-    device: Arc<SpinLock<dyn AnyNetworkDevice, BottomHalfDisabled>>,
-) {
-    COMPONENT
-        .get()
-        .unwrap()
-        .network_device_table
+pub fn get_device(name: &str) -> Option<Arc<dyn AnyNetworkDevice>> {
+    NetworkClass::class()
+        .devices
         .lock()
-        .insert(name, NetworkDeviceIrqCallbackSet::new(device));
-}
-
-pub fn get_device(str: &str) -> Option<Arc<SpinLock<dyn AnyNetworkDevice, BottomHalfDisabled>>> {
-    let table = COMPONENT.get().unwrap().network_device_table.lock();
-    let callbacks = table.get(str)?;
-    Some(callbacks.device.clone())
+        .get(name)
+        .map(|set| set.device.clone())
 }
 
 /// Registers callback which will be called when receiving message.
@@ -90,11 +148,11 @@ pub fn get_device(str: &str) -> Option<Arc<SpinLock<dyn AnyNetworkDevice, Bottom
 /// Since the callback will be called in softirq context,
 /// the callback function should _not_ sleep.
 pub fn register_recv_callback(name: &str, callback: impl NetDeviceCallback) {
-    let device_table = COMPONENT.get().unwrap().network_device_table.lock();
-    let Some(callbacks) = device_table.get(name) else {
+    let devices = NetworkClass::class().devices.lock();
+    let Some(device) = devices.get(name) else {
         return;
     };
-    callbacks.recv_callbacks.lock().push(Arc::new(callback));
+    device.recv_callbacks.lock().push(Arc::new(callback));
 }
 
 /// Registers a callback that will be invoked
@@ -106,19 +164,16 @@ pub fn register_recv_callback(name: &str, callback: impl NetDeviceCallback) {
 /// Please note that the callback may not be called every time a packet is sent.
 /// The driver may skip certain callbacks for performance optimization.
 pub fn register_send_callback(name: &str, callback: impl NetDeviceCallback) {
-    let device_table = COMPONENT.get().unwrap().network_device_table.lock();
-    let Some(callbacks) = device_table.get(name) else {
+    let devices = NetworkClass::class().devices.lock();
+    let Some(device) = devices.get(name) else {
         return;
     };
-    callbacks.send_callbacks.lock().push(Arc::new(callback));
+    device.send_callbacks.lock().push(Arc::new(callback));
 }
 
 fn handle_rx_softirq() {
-    let device_table = COMPONENT.get().unwrap().network_device_table.lock();
-    // TODO: We should handle network events for just one device per softirq,
-    // rather than processing events for all devices.
-    // This issue should be addressed once new network devices are added.
-    for callback_set in device_table.values() {
+    let devices = NetworkClass::class().devices.lock();
+    for callback_set in devices.values() {
         let recv_callbacks = callback_set.recv_callbacks.lock();
         for callback in recv_callbacks.iter() {
             callback();
@@ -127,18 +182,10 @@ fn handle_rx_softirq() {
 }
 
 fn handle_tx_softirq() {
-    let device_table = COMPONENT.get().unwrap().network_device_table.lock();
-    // TODO: We should handle network events for just one device per softirq,
-    // rather than processing events for all devices.
-    // This issue should be addressed once new network devices are added.
-    for callback_set in device_table.values() {
-        let can_send = {
-            let mut device = callback_set.device.lock();
-            device.free_processed_tx_buffers();
-            device.can_send()
-        };
-
-        if !can_send {
+    let devices = NetworkClass::class().devices.lock();
+    for callback_set in devices.values() {
+        callback_set.device.free_processed_tx_buffers();
+        if !callback_set.device.can_send() {
             continue;
         }
 
@@ -159,20 +206,18 @@ pub fn raise_receive_softirq() {
     SoftIrqLine::get(NETWORK_RX_SOFTIRQ_ID).raise();
 }
 
-pub fn all_devices() -> Vec<(String, NetworkDeviceRef)> {
-    let network_devs = COMPONENT.get().unwrap().network_device_table.lock();
-    network_devs
+pub fn all_devices() -> Vec<(String, Arc<dyn AnyNetworkDevice>)> {
+    NetworkClass::class()
+        .devices
+        .lock()
         .iter()
         .map(|(name, callbacks)| (name.clone(), callbacks.device.clone()))
         .collect()
 }
 
-static COMPONENT: Once<Component> = Once::new();
-
 #[init_component]
 fn init() -> Result<(), ComponentInitError> {
-    let component = Component::init()?;
-    COMPONENT.call_once(|| component);
+    NETWORK_CLASS.call_once(|| register_class(NetworkClass::new()).unwrap());
 
     SoftIrqLine::get(NETWORK_TX_SOFTIRQ_ID).enable(handle_tx_softirq);
     SoftIrqLine::get(NETWORK_RX_SOFTIRQ_ID).enable(handle_rx_softirq);
@@ -181,23 +226,15 @@ fn init() -> Result<(), ComponentInitError> {
 }
 
 type NetDeviceCallbackListRef = Arc<SpinLock<Vec<Arc<dyn NetDeviceCallback>>, BottomHalfDisabled>>;
-type NetworkDeviceRef = Arc<SpinLock<dyn AnyNetworkDevice, BottomHalfDisabled>>;
 
-struct Component {
-    /// Device list, the key is device name, value is (callbacks, device);
-    network_device_table:
-        SpinLock<BTreeMap<String, NetworkDeviceIrqCallbackSet>, BottomHalfDisabled>,
-}
-
-/// The send callbacks and recv callbacks for a network device
 struct NetworkDeviceIrqCallbackSet {
-    device: NetworkDeviceRef,
+    device: Arc<dyn AnyNetworkDevice>,
     recv_callbacks: NetDeviceCallbackListRef,
     send_callbacks: NetDeviceCallbackListRef,
 }
 
 impl NetworkDeviceIrqCallbackSet {
-    fn new(device: NetworkDeviceRef) -> Self {
+    fn new(device: Arc<dyn AnyNetworkDevice>) -> Self {
         Self {
             device,
             recv_callbacks: Arc::new(SpinLock::new(Vec::new())),
@@ -206,10 +243,18 @@ impl NetworkDeviceIrqCallbackSet {
     }
 }
 
-impl Component {
-    pub fn init() -> Result<Self, ComponentInitError> {
-        Ok(Self {
-            network_device_table: SpinLock::new(BTreeMap::new()),
-        })
+/// Allocates the next network device name.
+pub fn allocate_name() -> String {
+    static NEXT_INDEX: AtomicU32 = AtomicU32::new(0);
+
+    format!("eth{}", NEXT_INDEX.fetch_add(1, Ordering::Relaxed))
+}
+
+impl Debug for NetworkClass {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.debug_struct("NetworkClass")
+            .field("fields", &self.fields)
+            .field("device_count", &self.devices.lock().len())
+            .finish()
     }
 }

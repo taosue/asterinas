@@ -6,7 +6,6 @@ use aster_bigtcp::{
     device::WithDevice,
     iface::{InterfaceFlags, InterfaceName, InterfaceType},
 };
-use aster_softirq::BottomHalfDisabled;
 use spin::Once;
 
 use super::{Iface, poll::poll_ifaces};
@@ -29,9 +28,6 @@ pub(crate) fn iter_all_ifaces() -> Iter<'static, Arc<Iface>> {
     IFACES.get().unwrap().iter()
 }
 
-// TODO: Support multiple network devices and avoid the hardcoded device name.
-const VIRTIO_DEVICE_NAME: &str = aster_virtio::device::network::DEVICE_NAME;
-
 pub(crate) fn init() {
     IFACES.call_once(|| {
         let mut ifaces = Vec::with_capacity(2);
@@ -47,10 +43,12 @@ pub(crate) fn init() {
         ifaces
     });
 
-    if let Some(iface_virtio) = virtio_iface() {
+    if let Some(iface_virtio) = virtio_iface()
+        && let Some((name, _)) = aster_network::all_devices().into_iter().next()
+    {
         let callback = || iface_virtio.poll();
-        aster_network::register_recv_callback(VIRTIO_DEVICE_NAME, callback);
-        aster_network::register_send_callback(VIRTIO_DEVICE_NAME, callback);
+        aster_network::register_recv_callback(&name, callback);
+        aster_network::register_send_callback(&name, callback);
     }
 
     broadcast::init();
@@ -110,29 +108,15 @@ fn new_virtio() -> Option<Arc<Iface>> {
         iface::EtherIface,
         wire::{EthernetAddress, Ipv4Address, Ipv4Cidr},
     };
-    use aster_network::AnyNetworkDevice;
-
     const VIRTIO_ADDRESS: Ipv4Address = Ipv4Address::new(10, 0, 2, 15);
     const VIRTIO_ADDRESS_PREFIX_LEN: u8 = 24; // mask: 255.255.255.0
     const VIRTIO_GATEWAY: Ipv4Address = Ipv4Address::new(10, 0, 2, 2);
 
-    let virtio_net = aster_network::get_device(VIRTIO_DEVICE_NAME)?;
+    let (name, virtio_net) = aster_network::all_devices().into_iter().next()?;
 
-    let ether_addr = virtio_net.lock().mac_addr().0;
+    let ether_addr = virtio_net.mac_addr().0;
 
-    struct Wrapper(Arc<SpinLock<dyn AnyNetworkDevice, BottomHalfDisabled>>);
-
-    impl WithDevice for Wrapper {
-        type Device = dyn AnyNetworkDevice;
-
-        fn with<F, R>(&self, f: F) -> R
-        where
-            F: FnOnce(&mut Self::Device) -> R,
-        {
-            let mut device = self.0.lock();
-            f(&mut *device)
-        }
-    }
+    use aster_network::NetworkDeviceAdapter;
 
     // FIXME: These flags are currently hardcoded.
     // In the future, we should set appropriate values.
@@ -143,11 +127,11 @@ fn new_virtio() -> Option<Arc<Iface>> {
         | InterfaceFlags::LOWER_UP;
 
     Some(EtherIface::new(
-        Wrapper(virtio_net),
+        NetworkDeviceAdapter(virtio_net),
         EthernetAddress(ether_addr),
         Ipv4Cidr::new(VIRTIO_ADDRESS, VIRTIO_ADDRESS_PREFIX_LEN),
         VIRTIO_GATEWAY,
-        InterfaceName::from_str_truncated("eth0"),
+        InterfaceName::from_str_truncated(&name),
         PollScheduler::new(),
         flags,
     ))

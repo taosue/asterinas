@@ -20,10 +20,9 @@
 use alloc::sync::Arc;
 
 use aster_systree::{
-    BranchNodeFields, Error, NormalNodeFields, Result, SysAttrSetBuilder, SysObj, SysPerms, SysStr,
-    inherit_sys_branch_node, inherit_sys_leaf_node,
+    Error, NormalNodeFields, Result, SysAttrSetBuilder, SysObj, SysPerms, SysStr,
+    inherit_sys_leaf_node,
 };
-use inherit_methods_macro::inherit_methods;
 use ostd::{
     mm::{FallibleVmRead, FallibleVmWrite, VmReader, VmWriter},
     sync::RwMutex,
@@ -31,59 +30,10 @@ use ostd::{
 
 use crate::device::misc::tdxguest::{self, MeasurementReg, Rtmr, SHA384_DIGEST_SIZE};
 
-pub(super) fn init() {
-    let node = {
-        let tdx_guest_node = TdxGuestSysNodeRoot::new();
-        let measurement = Measurement::new(SysStr::from("measurements"));
-        tdx_guest_node.add_child(measurement).unwrap();
-
-        // FIXME: Temporary folder node until we have a proper sysfs devices
-        // implementation.
-        let misc_node = FolderNode::new("misc");
-        misc_node.add_child(tdx_guest_node).unwrap();
-        let virtual_node = FolderNode::new("virtual");
-        virtual_node.add_child(misc_node).unwrap();
-        let devices_node = FolderNode::new("devices");
-        devices_node.add_child(virtual_node).unwrap();
-
-        devices_node
-    };
-
-    crate::fs::sysfs::systree_singleton()
-        .root()
-        .add_child(node.clone())
-        .unwrap();
+/// Creates the `measurements` attribute group for the TDX guest device.
+pub(crate) fn measurements_node() -> Arc<dyn SysObj> {
+    Measurement::new(SysStr::from("measurements"))
 }
-
-/// A systree node representing the `/sys/devices/virtual/misc/tdx_guest`
-/// directory.
-#[derive(Debug)]
-struct TdxGuestSysNodeRoot {
-    fields: BranchNodeFields<dyn SysObj, Self>,
-}
-
-#[inherit_methods(from = "self.fields")]
-impl TdxGuestSysNodeRoot {
-    fn new() -> Arc<Self> {
-        let name = SysStr::from("tdx_guest");
-        let attrs = SysAttrSetBuilder::new().build().unwrap();
-        Arc::new_cyclic(|weak_self| {
-            let fields = BranchNodeFields::new(name, attrs, weak_self.clone());
-
-            TdxGuestSysNodeRoot { fields }
-        })
-    }
-
-    fn add_child(&self, new_child: Arc<dyn SysObj>) -> Result<()> {
-        self.fields.add_child(new_child)
-    }
-}
-
-inherit_sys_branch_node!(TdxGuestSysNodeRoot, fields, {
-    fn perms(&self) -> SysPerms {
-        SysPerms::DEFAULT_RW_PERMS
-    }
-});
 
 #[derive(Debug)]
 struct Measurement {
@@ -268,36 +218,5 @@ inherit_sys_leaf_node!(Measurement, fields, {
         }
 
         Ok(data.len())
-    }
-});
-
-#[derive(Debug)]
-struct FolderNode {
-    fields: BranchNodeFields<dyn SysObj, Self>,
-}
-
-#[inherit_methods(from = "self.fields")]
-impl FolderNode {
-    fn new(name: &'static str) -> Arc<Self> {
-        let name = SysStr::from(name);
-        Arc::new_cyclic(|weak_self| {
-            let fields = BranchNodeFields::new(
-                name,
-                SysAttrSetBuilder::new().build().unwrap(),
-                weak_self.clone(),
-            );
-
-            FolderNode { fields }
-        })
-    }
-
-    fn add_child(&self, new_child: Arc<dyn SysObj>) -> Result<()> {
-        self.fields.add_child(new_child)
-    }
-}
-
-inherit_sys_branch_node!(FolderNode, fields, {
-    fn perms(&self) -> SysPerms {
-        SysPerms::DEFAULT_RW_PERMS
     }
 });

@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt::Debug;
 
 use aster_bigtcp::device::{Checksum, DeviceCapabilities, Medium};
 use aster_network::{AnyNetworkDevice, EthernetAddr, NetError, RxBuffer, TxBuffer};
+use aster_systree::{
+    BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
+};
 use aster_util::slot_vec::SlotVec;
 use ostd::{arch::trap::TrapFrame, debug, sync::SpinLock, warn};
 
 use super::{config::VirtioNetConfig, header::VirtioNetHdr};
 use crate::{
+    VirtioDevice,
     device::{
         VirtioDeviceError,
         network::{
@@ -22,6 +26,12 @@ use crate::{
 };
 
 pub struct NetworkDevice {
+    fields: BranchNodeFields<dyn SysObj, Self>,
+    state: SpinLock<NetworkDeviceState>,
+}
+
+struct NetworkDeviceState {
+    transport: DeviceTransport,
     config_manager: ConfigManager<VirtioNetConfig>,
     // For smoltcp use
     caps: DeviceCapabilities,
@@ -34,7 +44,6 @@ pub struct NetworkDevice {
     tx_buffers: Vec<Option<TxBuffer>>,
     rx_buffers: SlotVec<RxBuffer>,
     new_rx_buffer: Option<RxBuffer>,
-    transport: DeviceTransport,
     poll_stat: PollStatistics,
 }
 
@@ -70,22 +79,24 @@ impl NetworkDevice {
         network_features.bits()
     }
 
-    pub(crate) fn init(mut device_transport: DeviceTransport) -> Result<(), VirtioDeviceError> {
-        let config_manager = VirtioNetConfig::new_manager(device_transport.as_ref());
+    pub(crate) fn new(virtio_device: Arc<VirtioDevice>) -> Result<Arc<Self>, VirtioDeviceError> {
+        let name = aster_network::allocate_name();
+        let mut transport = virtio_device.take_transport();
+        let config_manager = VirtioNetConfig::new_manager(transport.as_ref());
         let config = config_manager.read_config();
         debug!("virtio_net_config = {:?}", config);
         let mac_addr = config.mac;
         let features = NetworkFeatures::from_bits_truncate(Self::negotiate_features(
-            device_transport.read_device_features(),
+            transport.read_device_features(),
         ));
         debug!("features = {:?}", features);
 
         let caps = init_caps(&features, &config);
 
-        let mut send_queue = VirtQueue::new(QUEUE_SEND, QUEUE_SIZE, device_transport.as_mut())?;
+        let mut send_queue = VirtQueue::new(QUEUE_SEND, QUEUE_SIZE, transport.as_mut())?;
         send_queue.disable_callback();
 
-        let mut recv_queue = VirtQueue::new(QUEUE_RECV, QUEUE_SIZE, device_transport.as_mut())?;
+        let mut recv_queue = VirtQueue::new(QUEUE_RECV, QUEUE_SIZE, transport.as_mut())?;
 
         let tx_buffers = (0..QUEUE_SIZE).map(|_| None).collect();
 
@@ -98,20 +109,6 @@ impl NetworkDevice {
             assert_eq!(i, token);
             assert_eq!(rx_buffers.put(rx_buffer) as u16, i);
         }
-
-        let mut device = Self {
-            config_manager,
-            caps,
-            mac_addr,
-            send_queue,
-            recv_queue,
-            header: VirtioNetHdr::default(),
-            tx_buffers,
-            rx_buffers,
-            new_rx_buffer: None,
-            transport: device_transport,
-            poll_stat: PollStatistics::new(),
-        };
 
         /// Interrupt handler if network device config space changes
         fn config_space_change(_: &TrapFrame) {
@@ -126,28 +123,66 @@ impl NetworkDevice {
             aster_network::raise_receive_softirq();
         }
 
-        device
-            .transport
-            .register_cfg_callback(Box::new(config_space_change))?;
-        device
-            .transport
-            .register_queue_callback(QUEUE_SEND, Box::new(handle_send_event), true)?;
-        device
-            .transport
-            .register_queue_callback(QUEUE_RECV, Box::new(handle_recv_event), true)?;
+        transport.register_cfg_callback(Box::new(config_space_change))?;
+        transport.register_queue_callback(QUEUE_SEND, Box::new(handle_send_event), true)?;
+        transport.register_queue_callback(QUEUE_RECV, Box::new(handle_recv_event), true)?;
 
-        device.transport.finish_init();
-
-        if device.recv_queue.should_notify() {
+        transport.finish_init();
+        let mut state = NetworkDeviceState {
+            transport,
+            config_manager,
+            caps,
+            mac_addr,
+            send_queue,
+            recv_queue,
+            header: VirtioNetHdr::default(),
+            tx_buffers,
+            rx_buffers,
+            new_rx_buffer: None,
+            poll_stat: PollStatistics::new(),
+        };
+        if state.recv_queue.should_notify() {
             debug!("notify receive queue");
-            device.recv_queue.notify();
+            state.recv_queue.notify();
         }
 
-        aster_network::register_device(
-            super::DEVICE_NAME.to_string(),
-            Arc::new(SpinLock::new(device)),
-        );
-        Ok(())
+        let device = Arc::new_cyclic(|weak_self| Self {
+            fields: BranchNodeFields::new(
+                SysStr::from(name.clone()),
+                SysAttrSet::new_empty(),
+                weak_self.clone(),
+            ),
+            state: SpinLock::new(state),
+        });
+
+        Ok(device)
+    }
+}
+
+inherit_sys_branch_node!(NetworkDevice, fields, {
+    fn perms(&self) -> SysPerms {
+        SysPerms::DEFAULT_RO_PERMS
+    }
+});
+
+impl NetworkDeviceState {
+    fn can_receive(&self) -> bool {
+        self.recv_queue.can_pop()
+    }
+
+    fn can_send(&self) -> bool {
+        self.send_queue.available_desc() >= 1
+    }
+
+    fn free_processed_tx_buffers(&mut self) {
+        while let Ok((token, _)) = self.send_queue.pop_used() {
+            self.tx_buffers[token as usize] = None;
+        }
+    }
+
+    fn notify_poll_end(&mut self) {
+        self.notify_send_queue();
+        self.notify_receive_queue();
     }
 
     /// Adds a `RxBuffer` to the receive queue.
@@ -308,49 +343,47 @@ fn init_caps(features: &NetworkFeatures, config: &VirtioNetConfig) -> DeviceCapa
 
 impl AnyNetworkDevice for NetworkDevice {
     fn mac_addr(&self) -> EthernetAddr {
-        self.mac_addr
+        self.state.lock().mac_addr
     }
 
     fn capabilities(&self) -> DeviceCapabilities {
-        self.caps.clone()
+        self.state.lock().caps.clone()
     }
 
     fn can_receive(&self) -> bool {
-        self.recv_queue.can_pop()
+        self.state.lock().can_receive()
     }
 
     fn can_send(&self) -> bool {
-        self.send_queue.available_desc() >= 1
+        self.state.lock().can_send()
     }
 
-    fn receive(&mut self) -> Result<RxBuffer, NetError> {
-        self.receive()
+    fn receive(&self) -> Result<RxBuffer, NetError> {
+        self.state.lock().receive()
     }
 
-    fn send(&mut self, packet: &[u8]) -> Result<(), NetError> {
-        self.send(packet)
+    fn send(&self, packet: &[u8]) -> Result<(), NetError> {
+        self.state.lock().send(packet)
     }
 
-    fn free_processed_tx_buffers(&mut self) {
-        while let Ok((token, _)) = self.send_queue.pop_used() {
-            self.tx_buffers[token as usize] = None;
-        }
+    fn free_processed_tx_buffers(&self) {
+        self.state.lock().free_processed_tx_buffers();
     }
 
-    fn notify_poll_end(&mut self) {
-        self.notify_send_queue();
-        self.notify_receive_queue();
+    fn notify_poll_end(&self) {
+        self.state.lock().notify_poll_end();
     }
 }
 
 impl Debug for NetworkDevice {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let state = self.state.lock();
         f.debug_struct("NetworkDevice")
-            .field("config", &self.config_manager.read_config())
-            .field("mac_addr", &self.mac_addr)
-            .field("send_queue", &self.send_queue)
-            .field("recv_queue", &self.recv_queue)
-            .field("transport", &self.transport)
+            .field("config", &state.config_manager.read_config())
+            .field("mac_addr", &state.mac_addr)
+            .field("send_queue", &state.send_queue)
+            .field("recv_queue", &state.recv_queue)
+            .field("transport", &state.transport)
             .finish()
     }
 }

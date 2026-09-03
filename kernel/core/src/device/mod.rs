@@ -7,7 +7,9 @@ pub(crate) mod misc;
 mod pty;
 mod registry;
 pub(crate) mod tty;
+pub(crate) mod virtual_bus;
 
+pub(crate) use aster_device::DeviceType;
 use device_id::DeviceId;
 pub(crate) use mem::{getrandom, geturandom};
 pub(crate) use pty::{PtyMaster, PtySlave, new_pty_pair};
@@ -44,14 +46,8 @@ impl Debug for dyn DevNode {
     }
 }
 
-/// Device type
-#[derive(Debug)]
-pub(crate) enum DeviceType {
-    Char,
-    Block,
-}
-
 pub(crate) fn init_in_first_kthread() {
+    virtual_bus::init();
     registry::init_in_first_kthread();
     mem::init_in_first_kthread();
     misc::init_in_first_kthread();

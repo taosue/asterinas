@@ -45,6 +45,7 @@ pub(crate) enum VirtioDeviceType {
 pub enum VirtioDeviceError {
     Transport(VirtioTransportError),
     ResourceAlloc(ostd::Error),
+    Sysfs(aster_systree::Error),
     InvalidQueueArgs,
     UnsupportedConfig,
 }
@@ -52,6 +53,12 @@ pub enum VirtioDeviceError {
 impl From<VirtioTransportError> for VirtioDeviceError {
     fn from(value: VirtioTransportError) -> Self {
         Self::Transport(value)
+    }
+}
+
+impl From<aster_systree::Error> for VirtioDeviceError {
+    fn from(value: aster_systree::Error) -> Self {
+        Self::Sysfs(value)
     }
 }
 

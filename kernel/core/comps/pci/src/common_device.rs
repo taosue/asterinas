@@ -2,7 +2,13 @@
 
 //! PCI device common definitions or functions.
 
-use ostd::Result;
+use alloc::{format, sync::Arc};
+
+use aster_device::IsChild;
+use aster_systree::{
+    BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
+};
+use ostd::{Result, sync::Mutex};
 
 use crate::{
     capability::{RawCapabilities, msix::CapabilityMsixData, vendor::CapabilityVndrData},
@@ -15,10 +21,11 @@ use crate::{
 /// This type contains a range of information and functions common to PCI devices.
 #[derive(Debug)]
 pub struct PciCommonDevice {
+    fields: BranchNodeFields<dyn SysObj, Self>,
     device_id: PciDeviceId,
     location: PciDeviceLocation,
     header_type: PciHeaderType,
-    bar_manager: BarManager,
+    bar_manager: Mutex<BarManager>,
     capabilities: RawCapabilities,
 }
 
@@ -33,14 +40,14 @@ impl PciCommonDevice {
         &self.location
     }
 
-    /// Returns a reference to the PCI Base Address Register (BAR) manager.
-    pub fn bar_manager(&self) -> &BarManager {
+    /// Returns access to the PCI Base Address Register (BAR) manager.
+    pub fn bar_manager(&self) -> &Mutex<BarManager> {
         &self.bar_manager
     }
 
-    /// Returns a mutable reference to the PCI Base Address Register (BAR) manager.
-    pub fn bar_manager_mut(&mut self) -> &mut BarManager {
-        &mut self.bar_manager
+    /// Registers a child device below this PCI function.
+    pub fn add_device<T: IsChild<Self>>(&self, device: Arc<T>) -> aster_systree::Result<()> {
+        self.fields.add_child(device as Arc<dyn SysObj>)
     }
 
     /// Returns the PCI device type.
@@ -73,9 +80,10 @@ impl PciCommonDevice {
     ///
     /// Note that the MSI-X capability data occupies some memory BARs. Therefore, it will fail if
     /// the necessary resources are not available.
-    pub fn acquire_msix_capability(&mut self) -> Result<Option<CapabilityMsixData>> {
+    pub fn acquire_msix_capability(&self) -> Result<Option<CapabilityMsixData>> {
+        let mut bar_manager = self.bar_manager.lock();
         self.capabilities
-            .acquire_msix_data(&self.location, &mut self.bar_manager)
+            .acquire_msix_data(&self.location, &mut bar_manager)
     }
 
     /// Gets access to the vendor-specific capability data.
@@ -83,18 +91,7 @@ impl PciCommonDevice {
         self.capabilities.iter_vndr_data(&self.location)
     }
 
-    /// Gets access to the vendor-specific capability data with a mutable reference to the BAR
-    /// manager.
-    pub fn iter_vndr_capability_with_bar_manager(
-        &mut self,
-    ) -> (impl Iterator<Item = CapabilityVndrData>, &mut BarManager) {
-        (
-            self.capabilities.iter_vndr_data(&self.location),
-            &mut self.bar_manager,
-        )
-    }
-
-    pub(super) fn new(location: PciDeviceLocation) -> Option<Self> {
+    pub(super) fn new(location: PciDeviceLocation) -> Option<Arc<Self>> {
         if location.read16(0) == 0xFFFF {
             // No device.
             return None;
@@ -117,27 +114,43 @@ impl PciCommonDevice {
         };
         let capabilities = RawCapabilities::default();
 
-        let mut device = Self {
-            device_id,
-            location,
-            header_type,
-            bar_manager,
-            capabilities,
-        };
+        Some(Arc::new_cyclic(|weak_self| {
+            let mut device = Self {
+                fields: BranchNodeFields::new(
+                    SysStr::from(format!(
+                        "0000:{:02x}:{:02x}.{}",
+                        location.bus, location.device, location.function
+                    )),
+                    SysAttrSet::new_empty(),
+                    weak_self.clone(),
+                ),
+                device_id,
+                location,
+                header_type,
+                bar_manager: Mutex::new(bar_manager),
+                capabilities,
+            };
 
-        // While setting up the BARs, we need to ensure that
-        // "Decode (I/O or memory) of the appropriate address space is disabled via the Command
-        // Register before sizing a Base Address register."
-        let command_val = device.read_command() | Command::BUS_MASTER;
-        device.write_command(command_val - (Command::MEMORY_SPACE | Command::IO_SPACE));
-        device.bar_manager = BarManager::new(device.header_type.device_type(), location);
-        device.write_command(command_val | (Command::MEMORY_SPACE | Command::IO_SPACE));
+            // While setting up the BARs, we need to ensure that
+            // "Decode (I/O or memory) of the appropriate address space is disabled via the Command
+            // Register before sizing a Base Address register."
+            let command_val = device.read_command() | Command::BUS_MASTER;
+            device.write_command(command_val - (Command::MEMORY_SPACE | Command::IO_SPACE));
+            *device.bar_manager.lock() =
+                BarManager::new(device.header_type.device_type(), location);
+            device.write_command(command_val | (Command::MEMORY_SPACE | Command::IO_SPACE));
 
-        device.capabilities = RawCapabilities::parse(&device);
-
-        Some(device)
+            device.capabilities = RawCapabilities::parse(&device);
+            device
+        }))
     }
 }
+
+inherit_sys_branch_node!(PciCommonDevice, fields, {
+    fn perms(&self) -> SysPerms {
+        SysPerms::DEFAULT_RO_PERMS
+    }
+});
 
 /// The header type field of a PCI device struct in the PCI configuration space.
 ///

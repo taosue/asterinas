@@ -96,6 +96,8 @@ name = "aster-block"
 version = "0.1.0"
 dependencies = [
  "align_ext",
+ "aster-device",
+ "aster-systree",
  "aster-util",
  "bitvec",
  "component",
@@ -137,6 +139,7 @@ dependencies = [
  "aster-block",
  "aster-cmdline",
  "aster-console",
+ "aster-device",
  "aster-framebuffer",
  "aster-fuse",
  "aster-i8042",
@@ -194,6 +197,17 @@ dependencies = [
  "xmas-elf",
  "zerocopy",
  "zune-inflate",
+]
+
+[[package]]
+name = "aster-device"
+version = "0.1.0"
+dependencies = [
+ "aster-systree",
+ "component",
+ "device-id",
+ "ostd",
+ "spin",
 ]
 
 [[package]]
@@ -280,7 +294,9 @@ name = "aster-network"
 version = "0.1.0"
 dependencies = [
  "aster-bigtcp",
+ "aster-device",
  "aster-softirq",
+ "aster-systree",
  "bitvec",
  "component",
  "ostd",
@@ -310,6 +326,8 @@ name = "aster-pci"
 version = "0.1.0"
 dependencies = [
  "align_ext",
+ "aster-device",
+ "aster-systree",
  "bitflags 1.3.2",
  "component",
  "fdt",
@@ -405,12 +423,14 @@ dependencies = [
  "aster-block",
  "aster-cmdline",
  "aster-console",
+ "aster-device",
  "aster-fuse",
  "aster-input",
  "aster-network",
  "aster-pci",
  "aster-rights",
  "aster-softirq",
+ "aster-systree",
  "aster-util",
  "bitflags 1.3.2",
  "component",

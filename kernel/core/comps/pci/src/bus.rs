@@ -7,13 +7,7 @@ use core::fmt::Debug;
 
 use ostd::{bus::BusProbeError, debug, error};
 
-use super::{PciCommonDevice, device_info::PciDeviceId};
-
-/// A trait that represents PCI devices.
-pub trait PciDevice: Sync + Send + Debug {
-    /// Returns the device ID.
-    fn device_id(&self) -> PciDeviceId;
-}
+use super::PciCommonDevice;
 
 /// A trait that represents PCI device drivers.
 ///
@@ -22,26 +16,21 @@ pub trait PciDriver: Sync + Send + Debug {
     /// Probes an unclaimed PCI device.
     ///
     /// If the driver matches and succeeds in initializing the unclaimed device,
-    /// then the driver will return an claimed instance of the device,
-    /// signaling that the PCI device is now ready to work.
+    /// then it returns `Ok(())`, signaling that the PCI device is now ready to work.
     ///
     /// Once a device is matched and claimed by a driver,
     /// it won't be fed to another driver for probing.
-    #[expect(clippy::result_large_err)]
-    fn probe(
-        &self,
-        device: PciCommonDevice,
-    ) -> Result<Arc<dyn PciDevice>, (BusProbeError, PciCommonDevice)>;
+    fn probe(&self, device: &Arc<PciCommonDevice>) -> Result<(), BusProbeError>;
 }
 
-/// The PCI bus used to register PCI devices.
+/// The PCI bus used to register PCI drivers and devices.
 ///
 /// If a component wishes to drive a PCI device, it needs to provide the following:
-/// 1. The structure that implements the [`PciDevice`] trait.
-/// 2. A [`PciDriver`] instance.
+/// 1. A [`PciDriver`] instance.
+/// 2. Driver-owned storage for any state needed after probing succeeds.
+#[derive(Debug)]
 pub struct PciBus {
-    common_devices: VecDeque<PciCommonDevice>,
-    devices: Vec<Arc<dyn PciDevice>>,
+    devices: VecDeque<Arc<PciCommonDevice>>,
     drivers: Vec<Arc<dyn PciDriver>>,
 }
 
@@ -49,55 +38,44 @@ impl PciBus {
     /// Registers a PCI driver to the PCI bus.
     pub fn register_driver(&mut self, driver: Arc<dyn PciDriver>) {
         debug!("Register PCI driver: {:#x?}", driver);
-        let length = self.common_devices.len();
+        let length = self.devices.len();
         for _ in (0..length).rev() {
-            let common_device = self.common_devices.pop_front().unwrap();
-            let device_id = *common_device.device_id();
-            let device = match driver.probe(common_device) {
-                Ok(device) => {
-                    debug_assert!(device_id == device.device_id());
-                    self.devices.push(device);
+            let device = self.devices.pop_front().unwrap();
+            match driver.probe(&device) {
+                Ok(()) => {
                     continue;
                 }
-                Err((err, common_device)) => {
+                Err(err) => {
                     if err != BusProbeError::DeviceNotMatch {
                         error!("device construction failed, reason: {:?}", err);
                     }
-                    debug_assert!(device_id == *common_device.device_id());
-                    common_device
                 }
-            };
-            self.common_devices.push_back(device);
+            }
+            self.devices.push_back(device);
         }
         self.drivers.push(driver);
     }
 
-    pub(super) fn register_common_device(&mut self, mut common_device: PciCommonDevice) {
-        debug!("found common device: {:#x?}", common_device);
-        let device_id = *common_device.device_id();
+    pub(super) fn register_common_device(&mut self, device: Arc<PciCommonDevice>) {
+        debug!("found device: {:#x?}", device);
         for driver in self.drivers.iter() {
-            common_device = match driver.probe(common_device) {
-                Ok(device) => {
-                    debug_assert!(device_id == device.device_id());
-                    self.devices.push(device);
+            match driver.probe(&device) {
+                Ok(()) => {
                     return;
                 }
-                Err((err, common_device)) => {
+                Err(err) => {
                     if err != BusProbeError::DeviceNotMatch {
                         error!("device construction failed, reason: {:?}", err);
                     }
-                    debug_assert!(device_id == *common_device.device_id());
-                    common_device
                 }
-            };
+            }
         }
-        self.common_devices.push_back(common_device);
+        self.devices.push_back(device);
     }
 
     pub(super) const fn new() -> Self {
         Self {
-            common_devices: VecDeque::new(),
-            devices: Vec::new(),
+            devices: VecDeque::new(),
             drivers: Vec::new(),
         }
     }

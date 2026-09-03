@@ -7,7 +7,9 @@ edition.workspace = true
 
 [dependencies]
 aster-bigtcp.workspace = true
+aster-device.workspace = true
 aster-softirq.workspace = true
+aster-systree.workspace = true
 bitvec.workspace = true
 component.workspace = true
 ostd.workspace = true

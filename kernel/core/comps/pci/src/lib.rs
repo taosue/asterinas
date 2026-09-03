@@ -2,45 +2,26 @@
 
 //! The PCI bus of Asterinas.
 //!
-//! Users can implement the bus under the `PciDriver` to register devices to
-//! the PCI bus. When the physical device and the driver match successfully, it
-//! will be provided through the driver's `construct` function to construct a
-//! structure that implements the `PciDevice` trait. And in the end, the PCI
-//! bus will store a reference to the structure and finally call the driver's
-//! probe function to remind the driver of a new device access.
+//! Users can implement [`PciDriver`] to initialize devices on the PCI bus.
 //!
 //! Use case:
 //!
 //! ```rust no_run
 //! #[derive(Debug)]
-//! pub struct PciDeviceA {
-//!     common_device: PciCommonDevice,
-//! }
-//!
-//! impl PciDevice for PciDeviceA {
-//!     fn device_id(&self) -> PciDeviceId {
-//!         self.common_device.device_id().clone()
-//!     }
-//! }
-//!
-//! #[derive(Debug)]
 //! pub struct PciDriverA {
-//!     devices: Mutex<Vec<Arc<PciDeviceA>>>,
+//!     devices: Mutex<Vec<Arc<PciCommonDevice>>>,
 //! }
 //!
 //! impl PciDriver for PciDriverA {
 //!     fn probe(
 //!         &self,
-//!         device: PciCommonDevice,
-//!     ) -> Result<Arc<dyn PciDevice>, (PciDriverProbeError, PciCommonDevice)> {
+//!         device: &Arc<PciCommonDevice>,
+//!     ) -> Result<(), BusProbeError> {
 //!         if device.device_id().vendor_id != 0x1234 {
-//!             return Err((PciDriverProbeError::DeviceNotMatch, device));
+//!             return Err(BusProbeError::DeviceNotMatch);
 //!         }
-//!         let device = Arc::new(PciDeviceA {
-//!             common_device: device,
-//!         });
 //!         self.devices.lock().push(device.clone());
-//!         Ok(device)
+//!         Ok(())
 //!     }
 //! }
 //!
@@ -48,7 +29,7 @@
 //!     let driver_a = Arc::new(PciDriverA {
 //!         devices: Mutex::new(Vec::new()),
 //!     });
-//!     PCI_BUS.lock().register_driver(driver_a);
+//!     pci::register_driver(driver_a);
 //! }
 //! ```
 
@@ -72,14 +53,18 @@ pub mod capability;
 pub mod cfg_space;
 pub mod common_device;
 mod device_info;
+mod root;
 
 extern crate alloc;
 
+use alloc::sync::Arc;
+
 use component::{ComponentInitError, init_component};
 pub use device_info::{PciDeviceId, PciDeviceLocation};
-use ostd::sync::Mutex;
+use root::PciRootDevice;
+use spin::Once;
 
-use self::{bus::PciBus, common_device::PciCommonDevice};
+use self::{bus::PciDriver, common_device::PciCommonDevice};
 
 #[init_component]
 fn pci_init() -> Result<(), ComponentInitError> {
@@ -87,8 +72,12 @@ fn pci_init() -> Result<(), ComponentInitError> {
     Ok(())
 }
 
-/// The PCI bus instance.
-pub static PCI_BUS: Mutex<PciBus> = Mutex::new(PciBus::new());
+/// Registers a PCI driver with the PCI root device.
+pub fn register_driver(driver: Arc<dyn PciDriver>) {
+    if let Some(root) = PCI_ROOT_DEVICE.get() {
+        root.register_driver(driver);
+    }
+}
 
 fn init() {
     let Some(all_bus) = arch::init() else {
@@ -97,7 +86,11 @@ fn init() {
     };
     ostd::info!("initializing the PCI bus with bus numbers `{:?}`", all_bus);
 
-    let mut lock = PCI_BUS.lock();
+    let root = PCI_ROOT_DEVICE.call_once(|| {
+        let root = PciRootDevice::new(*all_bus.start());
+        aster_device::register_device(root.clone()).unwrap();
+        root
+    });
 
     let all_dev = PciDeviceLocation::MIN_DEVICE..=PciDeviceLocation::MAX_DEVICE;
     let all_func = PciDeviceLocation::MIN_FUNCTION..=PciDeviceLocation::MAX_FUNCTION;
@@ -115,16 +108,18 @@ fn init() {
             };
             let has_multi_function = first_function_device.has_multi_funcs();
             // Register function 0 in advance
-            lock.register_common_device(first_function_device);
+            root.register_common_device(first_function_device).unwrap();
 
             if has_multi_function {
                 for function in all_func.clone().skip(1) {
                     device_location.function = function;
                     if let Some(common_device) = PciCommonDevice::new(device_location) {
-                        lock.register_common_device(common_device);
+                        root.register_common_device(common_device).unwrap();
                     }
                 }
             }
         }
     }
 }
+
+static PCI_ROOT_DEVICE: Once<Arc<PciRootDevice>> = Once::new();

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use aster_systree::{
+    BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
+};
 use device_id::DeviceId;
 use ostd::mm::VmIo;
 use ostd_pod::Pod;
@@ -243,11 +246,14 @@ fn parse_gpt(device: &Arc<dyn BlockDevice>) -> Vec<Option<PartitionInfo>> {
 
 #[derive(Debug)]
 pub struct PartitionNode {
+    fields: BranchNodeFields<dyn SysObj, Self>,
     id: DeviceId,
     name: String,
     device: Arc<dyn BlockDevice>,
     info: PartitionInfo,
 }
+
+impl crate::AnyBlockDevice for PartitionNode {}
 
 impl BlockDevice for PartitionNode {
     fn enqueue(&self, mut bio: SubmittedBio) -> Result<(), BioEnqueueError> {
@@ -280,12 +286,23 @@ impl PartitionNode {
         name: String,
         device: Arc<dyn BlockDevice>,
         info: PartitionInfo,
-    ) -> Self {
-        Self {
+    ) -> Arc<Self> {
+        Arc::new_cyclic(|weak_self| Self {
+            fields: BranchNodeFields::new(
+                SysStr::from(name.clone()),
+                SysAttrSet::new_empty(),
+                weak_self.clone(),
+            ),
             id,
             name,
             device,
             info,
-        }
+        })
     }
 }
+
+inherit_sys_branch_node!(PartitionNode, fields, {
+    fn perms(&self) -> SysPerms {
+        SysPerms::DEFAULT_RO_PERMS
+    }
+});

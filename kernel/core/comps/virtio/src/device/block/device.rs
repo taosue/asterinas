@@ -18,6 +18,9 @@ use aster_block::{
     bio::{BioEnqueueError, BioStatus, BioType, SubmittedBio, bio_segment_pool_init},
     request_queue::{BioRequest, BioRequestSingleQueue},
 };
+use aster_systree::{
+    BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
+};
 use aster_util::mem_obj_slice::Slice;
 use device_id::{DeviceId, MinorId};
 use ostd::{
@@ -49,6 +52,7 @@ static NR_BLOCK_DEVICE: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug)]
 pub struct BlockDevice {
+    fields: BranchNodeFields<dyn SysObj, Self>,
     device: Arc<DeviceInner>,
     /// The software staging queue.
     queue: BioRequestSingleQueue,
@@ -81,8 +85,8 @@ impl BlockDevice {
         name
     }
 
-    /// Creates a new VirtIO-Block driver and registers it.
-    pub(crate) fn init(device_transport: DeviceTransport) -> Result<(), VirtioDeviceError> {
+    /// Creates a new VirtIO-Block driver.
+    pub(crate) fn new(device_transport: DeviceTransport) -> Result<Arc<Self>, VirtioDeviceError> {
         let device = DeviceInner::init(device_transport)?;
 
         let index = NR_BLOCK_DEVICE.fetch_add(1, Ordering::Relaxed);
@@ -93,6 +97,11 @@ impl BlockDevice {
         let name = Self::formatted_device_name(index);
 
         let block_device = Arc::new_cyclic(|weak_self| BlockDevice {
+            fields: BranchNodeFields::new(
+                SysStr::from(name.clone()),
+                SysAttrSet::new_empty(),
+                weak_self.clone(),
+            ),
             device,
             // Each bio request includes an additional 1 request and 1 response descriptor,
             // therefore this upper bound is set to (QUEUE_SIZE - 2).
@@ -105,10 +114,8 @@ impl BlockDevice {
             weak_self: weak_self.clone(),
         });
 
-        aster_block::register(block_device).unwrap();
-
         bio_segment_pool_init();
-        Ok(())
+        Ok(block_device)
     }
 
     /// Dequeues a `BioRequest` from the software staging queue and
@@ -128,6 +135,14 @@ impl BlockDevice {
         BlockFeatures::negotiated_with_device(device_features).bits()
     }
 }
+
+inherit_sys_branch_node!(BlockDevice, fields, {
+    fn perms(&self) -> SysPerms {
+        SysPerms::DEFAULT_RO_PERMS
+    }
+});
+
+impl aster_block::AnyBlockDevice for BlockDevice {}
 
 impl aster_block::BlockDevice for BlockDevice {
     fn enqueue(&self, bio: SubmittedBio) -> Result<(), BioEnqueueError> {
@@ -153,7 +168,7 @@ impl aster_block::BlockDevice for BlockDevice {
         let mut partitions = self.partitions.lock();
         if let Some(old_partitions) = partitions.take() {
             for partition in old_partitions {
-                let _ = aster_block::unregister(partition.id());
+                let _ = aster_block::unregister(aster_block::BlockDevice::id(partition.as_ref()));
             }
         }
 
@@ -169,10 +184,11 @@ impl aster_block::BlockDevice for BlockDevice {
             } else {
                 EXTENDED_DEVICE_ID_ALLOCATOR.get().unwrap().allocate()
             };
-            let name = format!("{}{}", self.name(), index);
+            let name = format!("{}{}", aster_block::BlockDevice::name(self), index);
             let device = self.weak_self.upgrade().unwrap();
 
-            let partition = Arc::new(PartitionNode::new(id, name, device, *info));
+            let partition = PartitionNode::new(id, name, device, *info);
+            let _ = self.fields.add_child(partition.clone());
             new_partitions.push(partition);
         }
 

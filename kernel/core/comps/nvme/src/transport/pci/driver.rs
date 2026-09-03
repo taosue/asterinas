@@ -2,31 +2,10 @@
 
 use alloc::{sync::Arc, vec::Vec};
 
-use aster_pci::{
-    PciDeviceId,
-    bus::{PciDevice, PciDriver},
-    common_device::PciCommonDevice,
-};
+use aster_pci::{bus::PciDriver, common_device::PciCommonDevice};
 use ostd::{bus::BusProbeError, sync::SpinLock};
 
 use super::transport::NvmePciTransport;
-
-#[derive(Debug)]
-struct NvmePciDevice {
-    device_id: PciDeviceId,
-}
-
-impl NvmePciDevice {
-    fn new(device_id: PciDeviceId) -> Self {
-        Self { device_id }
-    }
-}
-
-impl PciDevice for NvmePciDevice {
-    fn device_id(&self) -> PciDeviceId {
-        self.device_id
-    }
-}
 
 #[derive(Debug)]
 pub(crate) struct NvmePciDriver {
@@ -46,10 +25,7 @@ impl NvmePciDriver {
 }
 
 impl PciDriver for NvmePciDriver {
-    fn probe(
-        &self,
-        device: PciCommonDevice,
-    ) -> Result<Arc<dyn PciDevice>, (BusProbeError, PciCommonDevice)> {
+    fn probe(&self, device: &Arc<PciCommonDevice>) -> Result<(), BusProbeError> {
         const NVME_DEVICE_CLASS: u8 = 0x01;
         const NVME_DEVICE_SUBCLASS: u8 = 0x08;
         const NVME_DEVICE_PROG_IF: u8 = 0x02;
@@ -58,14 +34,13 @@ impl PciDriver for NvmePciDriver {
             || device.device_id().subclass != NVME_DEVICE_SUBCLASS
             || device.device_id().prog_if != NVME_DEVICE_PROG_IF
         {
-            return Err((BusProbeError::DeviceNotMatch, device));
+            return Err(BusProbeError::DeviceNotMatch);
         }
 
-        let device_id = *device.device_id();
-        let transport = NvmePciTransport::new(device)?;
+        let transport = NvmePciTransport::new(device.clone())?;
 
         self.devices.lock().push(transport);
 
-        Ok(Arc::new(NvmePciDevice::new(device_id)))
+        Ok(())
     }
 }
