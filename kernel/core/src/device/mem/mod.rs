@@ -18,8 +18,16 @@
 //!
 //! See <https://www.kernel.org/doc/Documentation/admin-guide/devices.txt>.
 
+mod class;
 mod file;
 
+use aster_device::{AnyDevice, IsChild};
+use aster_systree::{
+    BranchNodeFields, Error as SysError, Result as SysResult, SysAttrSetBuilder, SysObj, SysPerms,
+    SysStr, inherit_sys_branch_node,
+};
+use aster_util::printer::VmPrinter;
+use class::MemClass;
 use device_id::{DeviceId, MajorId, MinorId};
 use file::MemFile;
 pub(crate) use file::{getrandom, geturandom};
@@ -27,7 +35,8 @@ use spin::Once;
 
 use super::{
     DevNode, DeviceType,
-    registry::char::{MajorIdOwner, acquire_major, register},
+    registry::char::{self, MajorIdOwner},
+    virtual_bus::{self, VirtualBusDevice},
 };
 use crate::{
     fs::{
@@ -40,21 +49,61 @@ use crate::{
 /// A memory device.
 #[derive(Debug)]
 pub(crate) struct MemDevice {
+    fields: BranchNodeFields<dyn SysObj, Self>,
     id: DeviceId,
     file: MemFile,
 }
 
 impl MemDevice {
-    fn new(file: MemFile) -> Self {
+    fn new(file: MemFile) -> Result<Arc<Self>> {
         let major = MEM_MAJOR.get().unwrap().get();
         let minor = MinorId::new(file.minor());
 
-        Self {
+        let mut builder = SysAttrSetBuilder::new();
+        builder.add(SysStr::from("dev"), SysPerms::DEFAULT_RO_ATTR_PERMS);
+        let attrs = builder.build()?;
+
+        let device = Arc::new_cyclic(|weak_self| Self {
+            fields: BranchNodeFields::new(SysStr::from(file.name()), attrs, weak_self.clone()),
             id: DeviceId::new(major, minor),
             file,
-        }
+        });
+
+        virtual_bus::register_device(device.clone())?;
+        char::register(device.clone())?;
+        aster_device::register_dev_node(device.path().as_ref(), DeviceType::Char, device.id)?;
+
+        Ok(device)
     }
 }
+
+impl AnyDevice for MemDevice {
+    type Class = MemClass;
+}
+
+impl IsChild<VirtualBusDevice> for MemDevice {}
+
+inherit_sys_branch_node!(MemDevice, fields, {
+    fn read_attr_at(&self, name: &str, offset: usize, writer: &mut VmWriter) -> SysResult<usize> {
+        match name {
+            "dev" => {
+                let mut printer = VmPrinter::new_skip(writer, offset);
+                writeln!(
+                    printer,
+                    "{}:{}",
+                    self.id.major().get(),
+                    self.id.minor().get()
+                )?;
+                Ok(printer.bytes_written())
+            }
+            _ => Err(SysError::AttributeError),
+        }
+    }
+
+    fn perms(&self) -> SysPerms {
+        SysPerms::DEFAULT_RO_PERMS
+    }
+});
 
 impl DevNode for MemDevice {
     fn type_(&self) -> DeviceType {
@@ -92,11 +141,12 @@ impl DevNode for MemDevice {
 static MEM_MAJOR: Once<MajorIdOwner> = Once::new();
 
 pub(super) fn init_in_first_kthread() {
-    MEM_MAJOR.call_once(|| acquire_major(MajorId::new(1)).unwrap());
+    MEM_MAJOR.call_once(|| char::acquire_major(MajorId::new(1)).unwrap());
+    class::init_in_first_kthread();
 
-    register(Arc::new(MemDevice::new(MemFile::Full))).unwrap();
-    register(Arc::new(MemDevice::new(MemFile::Null))).unwrap();
-    register(Arc::new(MemDevice::new(MemFile::Random))).unwrap();
-    register(Arc::new(MemDevice::new(MemFile::Urandom))).unwrap();
-    register(Arc::new(MemDevice::new(MemFile::Zero))).unwrap();
+    MemDevice::new(MemFile::Full).unwrap();
+    MemDevice::new(MemFile::Null).unwrap();
+    MemDevice::new(MemFile::Random).unwrap();
+    MemDevice::new(MemFile::Urandom).unwrap();
+    MemDevice::new(MemFile::Zero).unwrap();
 }

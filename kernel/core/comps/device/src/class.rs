@@ -21,7 +21,7 @@ pub trait Class: SysBranchNode {
     fn name() -> &'static str;
 
     /// The device type represented by this class.
-    type Device: SysBranchNode + ?Sized;
+    type Device: AnyDevice + ?Sized;
 
     /// Registers a device in this class's subsystem state.
     fn register(device: Arc<Self::Device>) -> aster_systree::Result<()>;
@@ -47,7 +47,7 @@ inherit_sys_branch_node!(NoClass, fields, {
 impl Class for NoClass {
     const HAS_CLASS: bool = false;
 
-    type Device = dyn SysBranchNode;
+    type Device = dyn AnyDevice;
 
     fn name() -> &'static str {
         "no_class"
