@@ -4,7 +4,7 @@
 
 use alloc::{format, sync::Arc};
 
-use aster_device::IsChild;
+use aster_device::AnyDevice;
 use aster_systree::{
     BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
 };
@@ -29,6 +29,10 @@ pub struct PciCommonDevice {
     capabilities: RawCapabilities,
 }
 
+impl AnyDevice for PciCommonDevice {}
+
+aster_device::impl_device_parent!(PciCommonDevice, fields, pub);
+
 impl PciCommonDevice {
     /// Returns the PCI device ID.
     pub fn device_id(&self) -> &PciDeviceId {
@@ -43,11 +47,6 @@ impl PciCommonDevice {
     /// Returns access to the PCI Base Address Register (BAR) manager.
     pub fn bar_manager(&self) -> &Mutex<BarManager> {
         &self.bar_manager
-    }
-
-    /// Registers a child device below this PCI function.
-    pub fn add_device<T: IsChild<Self>>(&self, device: Arc<T>) -> aster_systree::Result<()> {
-        self.fields.add_child(device as Arc<dyn SysObj>)
     }
 
     /// Returns the PCI device type.

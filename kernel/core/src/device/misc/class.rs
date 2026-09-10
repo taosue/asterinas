@@ -4,7 +4,7 @@
 
 use alloc::sync::Arc;
 
-use aster_device::{Class, register_class};
+use aster_device::{Class, ClassFor};
 use aster_systree::{BranchNodeFields, SysAttrSet, SysPerms, SysStr, inherit_sys_branch_node};
 use spin::Once;
 
@@ -47,6 +47,12 @@ impl Class for MiscClass {
     }
 }
 
+impl<D: AnyMiscDevice> ClassFor<D> for MiscClass {
+    fn into_class_device(device: Arc<D>) -> Arc<Self::Device> {
+        device
+    }
+}
+
 inherit_sys_branch_node!(MiscClass, fields, {
     fn perms(&self) -> SysPerms {
         SysPerms::DEFAULT_RO_PERMS
@@ -54,5 +60,5 @@ inherit_sys_branch_node!(MiscClass, fields, {
 });
 
 pub(super) fn init_in_first_kthread() {
-    MISC_CLASS.call_once(|| register_class(MiscClass::new()).unwrap());
+    MISC_CLASS.call_once(|| aster_device::register_class(MiscClass::new()).unwrap());
 }

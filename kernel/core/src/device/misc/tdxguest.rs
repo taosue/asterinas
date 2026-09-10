@@ -40,6 +40,7 @@
 
 use core::{mem::offset_of, time::Duration};
 
+use aster_device::{AnyDevice, IsChild};
 use aster_systree::{
     BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
 };
@@ -58,7 +59,11 @@ use tdx_guest::{
 
 use super::{AnyMiscDevice, MiscClass};
 use crate::{
-    device::{DevNode, DeviceType, registry::char::register, virtual_bus},
+    device::{
+        DevNode, DeviceType,
+        registry::char,
+        virtual_bus::{self, VirtualBusDevice},
+    },
     events::IoEvents,
     fs::{
         devtmpfs::DevtmpfsNodeMeta,
@@ -97,9 +102,9 @@ impl TdxGuest {
                 id: DeviceId::new(major, minor),
             }
         });
-        virtual_bus::register_class_device::<MiscClass>(dev.clone())?;
+        virtual_bus::register_device(dev.clone())?;
 
-        register(dev.clone())?;
+        char::register(dev.clone())?;
         let dev_node: &dyn DevNode = dev.as_ref();
         aster_device::register_dev_node(dev.path().as_ref(), dev_node.type_(), dev_node.id())?;
         Ok(dev)
@@ -125,6 +130,12 @@ impl DevNode for TdxGuest {
 }
 
 impl AnyMiscDevice for TdxGuest {}
+
+impl AnyDevice for TdxGuest {
+    type Class = MiscClass;
+}
+
+impl IsChild<VirtualBusDevice> for TdxGuest {}
 
 inherit_sys_branch_node!(TdxGuest, fields, {
     fn perms(&self) -> SysPerms {

@@ -2,7 +2,7 @@
 
 //! The `/sys/devices/virtual` topology parent.
 
-use aster_device::Class;
+use aster_device::{AnyDevice, IsChild};
 use aster_systree::{
     BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
 };
@@ -10,12 +10,11 @@ use spin::Once;
 
 use crate::prelude::*;
 
-/// Registers and adds a class-specific device to the virtual topology.
-pub(crate) fn register_class_device<T: Class>(device: Arc<T::Device>) -> Result<()> {
-    VIRTUAL_BUS_DEVICE
-        .get()
-        .unwrap()
-        .add_class_device::<T>(device)?;
+/// Registers a device under the virtual topology.
+pub(crate) fn register_device<T: AnyDevice + IsChild<VirtualBusDevice>>(
+    device: Arc<T>,
+) -> Result<()> {
+    VIRTUAL_BUS_DEVICE.get().unwrap().add_device(device)?;
     Ok(())
 }
 
@@ -27,9 +26,11 @@ pub(super) fn init() {
 static VIRTUAL_BUS_DEVICE: Once<Arc<VirtualBusDevice>> = Once::new();
 
 #[derive(Debug)]
-struct VirtualBusDevice {
+pub(crate) struct VirtualBusDevice {
     fields: BranchNodeFields<dyn SysObj, Self>,
 }
+
+impl AnyDevice for VirtualBusDevice {}
 
 impl VirtualBusDevice {
     fn new() -> Arc<Self> {
@@ -43,7 +44,7 @@ impl VirtualBusDevice {
     }
 }
 
-aster_device::impl_class_device_parent!(VirtualBusDevice, fields);
+aster_device::impl_device_parent!(VirtualBusDevice, fields);
 
 inherit_sys_branch_node!(VirtualBusDevice, fields, {
     fn perms(&self) -> SysPerms {

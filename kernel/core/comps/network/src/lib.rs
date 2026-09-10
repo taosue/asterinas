@@ -19,13 +19,13 @@ use core::{
 };
 
 use aster_bigtcp::device::DeviceCapabilities;
-use aster_device::{Class, register_class};
+use aster_device::{AnyDevice, Class, ClassFor};
 use aster_softirq::{
     BottomHalfDisabled, SoftIrqLine,
     softirq_id::{NETWORK_RX_SOFTIRQ_ID, NETWORK_TX_SOFTIRQ_ID},
 };
 use aster_systree::{
-    BranchNodeFields, Result as SysResult, SysAttrSet, SysBranchNode, SysObj, SysPerms, SysStr,
+    BranchNodeFields, Result as SysResult, SysAttrSet, SysObj, SysPerms, SysStr,
     inherit_sys_branch_node,
 };
 pub use buffer::{RxBuffer, TxBuffer, TxBufferBuilder};
@@ -98,13 +98,19 @@ impl Class for NetworkClass {
     }
 }
 
+impl<D: AnyNetworkDevice> ClassFor<D> for NetworkClass {
+    fn into_class_device(device: Arc<D>) -> Arc<Self::Device> {
+        device
+    }
+}
+
 inherit_sys_branch_node!(NetworkClass, fields, {
     fn perms(&self) -> SysPerms {
         SysPerms::DEFAULT_RO_PERMS
     }
 });
 
-pub trait AnyNetworkDevice: SysBranchNode + Send + Sync + Any + Debug {
+pub trait AnyNetworkDevice: AnyDevice + Send + Sync + Any + Debug {
     // ================Device Information=================
 
     fn mac_addr(&self) -> EthernetAddr;
@@ -217,7 +223,7 @@ pub fn all_devices() -> Vec<(String, Arc<dyn AnyNetworkDevice>)> {
 
 #[init_component]
 fn init() -> Result<(), ComponentInitError> {
-    NETWORK_CLASS.call_once(|| register_class(NetworkClass::new()).unwrap());
+    NETWORK_CLASS.call_once(|| aster_device::register_class(NetworkClass::new()).unwrap());
 
     SoftIrqLine::get(NETWORK_TX_SOFTIRQ_ID).enable(handle_tx_softirq);
     SoftIrqLine::get(NETWORK_RX_SOFTIRQ_ID).enable(handle_rx_softirq);

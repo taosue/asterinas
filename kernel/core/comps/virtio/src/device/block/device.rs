@@ -14,10 +14,12 @@ use core::{
 };
 
 use aster_block::{
-    BlockDeviceMeta, EXTENDED_DEVICE_ID_ALLOCATOR, PartitionInfo, PartitionNode,
+    AnyBlockDevice, BlockClass, BlockDeviceMeta, EXTENDED_DEVICE_ID_ALLOCATOR, PartitionInfo,
+    PartitionNode,
     bio::{BioEnqueueError, BioStatus, BioType, SubmittedBio, bio_segment_pool_init},
     request_queue::{BioRequest, BioRequestSingleQueue},
 };
+use aster_device::{AnyDevice, Class, IsChild};
 use aster_systree::{
     BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
 };
@@ -32,7 +34,7 @@ use ostd::{
 
 use super::{BlockFeatures, VirtioBlockConfig};
 use crate::{
-    VIRTIO_BLOCK_MAJOR_ID,
+    VIRTIO_BLOCK_MAJOR_ID, VirtioDevice,
     device::{
         VirtioDeviceError,
         block::{ReqType, RespStatus},
@@ -118,6 +120,11 @@ impl BlockDevice {
         Ok(block_device)
     }
 
+    fn add_device(&self, device: Arc<PartitionNode>) -> aster_systree::Result<()> {
+        self.fields.add_child(device.clone())?;
+        BlockClass::register(device)
+    }
+
     /// Dequeues a `BioRequest` from the software staging queue and
     /// processes the request.
     pub fn handle_requests(&self) {
@@ -142,7 +149,13 @@ inherit_sys_branch_node!(BlockDevice, fields, {
     }
 });
 
-impl aster_block::AnyBlockDevice for BlockDevice {}
+impl AnyBlockDevice for BlockDevice {}
+
+impl AnyDevice for BlockDevice {
+    type Class = BlockClass;
+}
+
+impl IsChild<VirtioDevice> for BlockDevice {}
 
 impl aster_block::BlockDevice for BlockDevice {
     fn enqueue(&self, bio: SubmittedBio) -> Result<(), BioEnqueueError> {
@@ -188,12 +201,8 @@ impl aster_block::BlockDevice for BlockDevice {
             let device = self.weak_self.upgrade().unwrap();
 
             let partition = PartitionNode::new(id, name, device, *info);
-            let _ = self.fields.add_child(partition.clone());
+            let _ = self.add_device(partition.clone());
             new_partitions.push(partition);
-        }
-
-        for partition in new_partitions.iter() {
-            let _ = aster_block::register(partition.clone());
         }
 
         *partitions = Some(new_partitions);

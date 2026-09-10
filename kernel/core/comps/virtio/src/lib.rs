@@ -60,7 +60,7 @@ fn virtio_component_init() -> Result<(), ComponentInitError> {
             VirtioDeviceType::Block => {
                 BlockDevice::new(device.take_transport()).and_then(|block_device| {
                     device
-                        .add_class_device::<aster_block::BlockClass>(block_device)
+                        .add_device(block_device)
                         .map_err(VirtioDeviceError::Sysfs)
                 })
             }
@@ -70,7 +70,7 @@ fn virtio_component_init() -> Result<(), ComponentInitError> {
             VirtioDeviceType::Network => {
                 NetworkDevice::new(device.clone()).and_then(|network_device| {
                     device
-                        .add_class_device::<aster_network::NetworkClass>(network_device)
+                        .add_device(network_device)
                         .map_err(VirtioDeviceError::Sysfs)
                 })
             }

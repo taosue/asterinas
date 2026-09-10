@@ -48,9 +48,9 @@ mod prelude;
 pub mod request_queue;
 
 use ::device_id::DeviceId;
-use aster_device::{Class, register_class};
+use aster_device::{AnyDevice, Class, ClassFor};
 use aster_systree::{
-    BranchNodeFields, SysAttrSet, SysBranchNode, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
+    BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
 };
 use component::{ComponentInitError, init_component};
 pub use device_id::{EXTENDED_DEVICE_ID_ALLOCATOR, MajorIdOwner, acquire_major, allocate_major};
@@ -94,7 +94,7 @@ pub trait BlockDevice: Send + Sync + Any + Debug {
 }
 
 /// A block device that can be attached to the device tree.
-pub trait AnyBlockDevice: BlockDevice + SysBranchNode {}
+pub trait AnyBlockDevice: BlockDevice + AnyDevice {}
 
 const BLOCK_CLASS_NAME: &str = "block";
 
@@ -135,6 +135,12 @@ impl Class for BlockClass {
 
         register(device).map_err(|_| aster_systree::Error::AlreadyExists)?;
         class.add_device_link(name, path.as_ref())
+    }
+}
+
+impl<D: AnyBlockDevice> ClassFor<D> for BlockClass {
+    fn into_class_device(device: Arc<D>) -> Arc<Self::Device> {
+        device
     }
 }
 
@@ -237,7 +243,7 @@ static DEVICE_REGISTRY: Mutex<BTreeMap<u32, Arc<dyn BlockDevice>>> = Mutex::new(
 #[init_component]
 fn init() -> Result<(), ComponentInitError> {
     device_id::init();
-    BLOCK_CLASS.call_once(|| register_class(BlockClass::new()).unwrap());
+    BLOCK_CLASS.call_once(|| aster_device::register_class(BlockClass::new()).unwrap());
 
     Ok(())
 }

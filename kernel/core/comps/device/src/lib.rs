@@ -4,6 +4,7 @@
 
 #![no_std]
 #![deny(unsafe_code)]
+#![feature(associated_type_defaults)]
 
 extern crate alloc;
 
@@ -11,10 +12,10 @@ mod class;
 mod dev;
 mod device;
 
-pub use class::{Class, ClassDeviceLink, ClassGlueDir, register_class};
+pub use class::{Class, ClassDeviceLink, ClassFor, ClassGlueDir, NoClass, register_class};
 use component::{ComponentInitError, init_component};
 pub use dev::{DeviceType, register_dev_node};
-pub use device::{IsChild, register_device};
+pub use device::{AnyDevice, IsChild, register_device};
 
 #[init_component]
 fn init() -> Result<(), ComponentInitError> {

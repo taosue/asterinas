@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use aster_device::AnyDevice;
 use aster_systree::{
     BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
 };
@@ -8,7 +9,7 @@ use ostd::mm::VmIo;
 use ostd_pod::Pod;
 
 use crate::{
-    BlockDevice, BlockDeviceMeta, SECTOR_SIZE,
+    AnyBlockDevice, BlockClass, BlockDevice, BlockDeviceMeta, SECTOR_SIZE,
     bio::{BioEnqueueError, SubmittedBio},
     prelude::*,
 };
@@ -253,7 +254,11 @@ pub struct PartitionNode {
     info: PartitionInfo,
 }
 
-impl crate::AnyBlockDevice for PartitionNode {}
+impl AnyBlockDevice for PartitionNode {}
+
+impl AnyDevice for PartitionNode {
+    type Class = BlockClass;
+}
 
 impl BlockDevice for PartitionNode {
     fn enqueue(&self, mut bio: SubmittedBio) -> Result<(), BioEnqueueError> {

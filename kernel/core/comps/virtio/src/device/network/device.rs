@@ -4,7 +4,8 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt::Debug;
 
 use aster_bigtcp::device::{Checksum, DeviceCapabilities, Medium};
-use aster_network::{AnyNetworkDevice, EthernetAddr, NetError, RxBuffer, TxBuffer};
+use aster_device::{AnyDevice, IsChild};
+use aster_network::{AnyNetworkDevice, EthernetAddr, NetError, NetworkClass, RxBuffer, TxBuffer};
 use aster_systree::{
     BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
 };
@@ -29,6 +30,12 @@ pub struct NetworkDevice {
     fields: BranchNodeFields<dyn SysObj, Self>,
     state: SpinLock<NetworkDeviceState>,
 }
+
+impl AnyDevice for NetworkDevice {
+    type Class = NetworkClass;
+}
+
+impl IsChild<VirtioDevice> for NetworkDevice {}
 
 struct NetworkDeviceState {
     transport: DeviceTransport,

@@ -8,7 +8,7 @@ use core::{
     sync::atomic::{AtomicU32, Ordering},
 };
 
-use aster_device::IsChild;
+use aster_device::{AnyDevice, IsChild};
 use aster_pci::common_device::PciCommonDevice;
 use aster_systree::{
     BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
@@ -37,6 +37,8 @@ pub(crate) struct VirtioDevice {
 }
 
 impl IsChild<PciCommonDevice> for VirtioDevice {}
+
+impl AnyDevice for VirtioDevice {}
 
 impl VirtioDevice {
     pub(crate) fn new(transport: Box<dyn VirtioTransport>) -> Arc<Self> {
@@ -139,7 +141,7 @@ impl VirtioDevice {
     }
 }
 
-aster_device::impl_class_device_parent!(VirtioDevice, fields, pub(crate));
+aster_device::impl_device_parent!(VirtioDevice, fields, pub(crate));
 
 bitflags! {
     /// Device-independent VirtIO feature bits.
