@@ -47,7 +47,7 @@ inherit_sys_branch_node!(NoClass, fields, {
 impl Class for NoClass {
     const HAS_CLASS: bool = false;
 
-    type Device = dyn AnyDevice;
+    type Device = dyn AnyDevice<Class = NoClass>;
 
     fn name() -> &'static str {
         "no_class"
@@ -58,7 +58,7 @@ impl Class for NoClass {
     }
 }
 
-impl<D: AnyDevice> ClassFor<D> for NoClass {
+impl<D: AnyDevice<Class = NoClass>> ClassFor<D> for NoClass {
     fn into_class_device(device: Arc<D>) -> Arc<Self::Device> {
         device
     }
@@ -104,7 +104,10 @@ macro_rules! impl_device_parent {
             $($vis)? fn add_device<T: $crate::AnyDevice + $crate::IsChild<Self>>(
                 &self,
                 device: ::alloc::sync::Arc<T>,
-            ) -> ::aster_systree::Result<()> {
+            ) -> ::aster_systree::Result<()>
+            where
+                T::Class: $crate::ClassFor<T>,
+            {
                 if !<T::Class as $crate::Class>::HAS_CLASS {
                     return self.$field.add_child(device);
                 }

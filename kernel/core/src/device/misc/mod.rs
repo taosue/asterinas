@@ -24,7 +24,7 @@ pub(crate) struct MiscClass {
 }
 
 /// A device accepted by the misc class.
-pub(crate) trait AnyMiscDevice: AnyDevice {}
+pub(crate) trait AnyMiscDevice: AnyDevice<Class = MiscClass> {}
 
 pub(super) fn init_in_first_kthread() {
     MISC_MAJOR.call_once(|| acquire_major(MajorId::new(10)).unwrap());

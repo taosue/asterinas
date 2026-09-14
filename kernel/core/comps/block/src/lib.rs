@@ -94,7 +94,7 @@ pub trait BlockDevice: Send + Sync + Any + Debug {
 }
 
 /// A block device that can be attached to the device tree.
-pub trait AnyBlockDevice: BlockDevice + AnyDevice {}
+pub trait AnyBlockDevice: BlockDevice + AnyDevice<Class = BlockClass> {}
 
 const BLOCK_CLASS_NAME: &str = "block";
 

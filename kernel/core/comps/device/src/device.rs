@@ -9,14 +9,11 @@ use aster_systree::{
 };
 use spin::Once;
 
-use crate::{ClassFor, NoClass};
+use crate::{Class, NoClass};
 
 /// A device with a statically selected class or [`crate::NoClass`].
 pub trait AnyDevice: SysBranchNode {
-    type Class: ClassFor<Self>
-        = NoClass
-    where
-        Self: Sized;
+    type Class: Class = NoClass;
 }
 
 /// Marks `Child` as a child of `Parent` in the device topology.

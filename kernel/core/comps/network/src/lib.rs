@@ -110,7 +110,7 @@ inherit_sys_branch_node!(NetworkClass, fields, {
     }
 });
 
-pub trait AnyNetworkDevice: AnyDevice + Send + Sync + Any + Debug {
+pub trait AnyNetworkDevice: AnyDevice<Class = NetworkClass> + Send + Sync + Any + Debug {
     // ================Device Information=================
 
     fn mac_addr(&self) -> EthernetAddr;

@@ -2,7 +2,7 @@
 
 //! The `/sys/devices/virtual` topology parent.
 
-use aster_device::{AnyDevice, IsChild};
+use aster_device::{AnyDevice, ClassFor, IsChild};
 use aster_systree::{
     BranchNodeFields, SysAttrSet, SysObj, SysPerms, SysStr, inherit_sys_branch_node,
 };
@@ -13,7 +13,10 @@ use crate::prelude::*;
 /// Registers a device under the virtual topology.
 pub(crate) fn register_device<T: AnyDevice + IsChild<VirtualBusDevice>>(
     device: Arc<T>,
-) -> Result<()> {
+) -> Result<()>
+where
+    T::Class: ClassFor<T>,
+{
     VIRTUAL_BUS_DEVICE.get().unwrap().add_device(device)?;
     Ok(())
 }
