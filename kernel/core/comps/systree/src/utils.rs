@@ -22,6 +22,11 @@ use super::{
 };
 use crate::{SysBranchNode, SysNode, SysSymlink};
 
+/// Returns whether a name is empty, `.` or `..`, or contains `/` or `NUL`.
+pub fn is_invalid_name(name: &str) -> bool {
+    name.is_empty() || matches!(name, "." | "..") || name.contains(['/', '\0'])
+}
+
 /// Fields for all `SysObj` types, including `SysNode` and `SysBranchNode`.
 #[derive(Debug)]
 pub struct ObjFields<T: SysObj> {
@@ -32,10 +37,24 @@ pub struct ObjFields<T: SysObj> {
 }
 
 impl<T: SysObj> ObjFields<T> {
+    /// Creates object fields for a non-root node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the name is empty, `.` or `..`, or contains `/` or `NUL`.
     pub fn new(name: SysStr, weak_self: Weak<T>) -> Self {
+        assert!(!is_invalid_name(&name), "invalid SysTree node name");
+        Self {
+            name,
+            ..Self::new_root(weak_self)
+        }
+    }
+
+    /// Creates object fields with an empty name for a root node.
+    pub fn new_root(weak_self: Weak<T>) -> Self {
         Self {
             id: SysNodeId::new(),
-            name,
+            name: SysStr::from(""),
             parent: Once::new(),
             weak_self,
         }
@@ -120,6 +139,14 @@ impl<C: SysObj + ?Sized, T: SysBranchNode> AttrLessBranchNodeFields<C, T> {
         }
     }
 
+    /// Creates attribute-less branch fields with an empty name for a root node.
+    pub fn new_root(weak_self: Weak<T>) -> Self {
+        Self {
+            base: ObjFields::new_root(weak_self),
+            children: RwMutex::new(BTreeMap::new()),
+        }
+    }
+
     pub fn obj_field(&self) -> &ObjFields<T>;
 
     pub fn id(&self) -> &SysNodeId;
@@ -200,6 +227,14 @@ impl<C: SysObj + ?Sized, T: SysBranchNode> BranchNodeFields<C, T> {
     pub fn new(name: SysStr, attr_set: SysAttrSet, weak_self: Weak<T>) -> Self {
         Self {
             base: AttrLessBranchNodeFields::new(name, weak_self),
+            attr_set,
+        }
+    }
+
+    /// Creates branch fields with an empty name for a root node.
+    pub fn new_root(attr_set: SysAttrSet, weak_self: Weak<T>) -> Self {
+        Self {
+            base: AttrLessBranchNodeFields::new_root(weak_self),
             attr_set,
         }
     }

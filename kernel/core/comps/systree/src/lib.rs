@@ -46,7 +46,7 @@ pub use self::{
     utils::{
         _InheritSysBranchNode, _InheritSysLeafNode, _InheritSysSymlinkNode,
         AttrLessBranchNodeFields, BranchNodeFields, EmptyNode, NormalNodeFields, ObjFields,
-        SymlinkNodeFields,
+        SymlinkNodeFields, is_invalid_name,
     },
 };
 use crate::tree::RootNode;
@@ -86,6 +86,8 @@ pub enum Error {
     NotFound,
     /// Invalid operation occurred
     InvalidOperation,
+    /// The name is empty, `.` or `..`, or contains `/` or `NUL`.
+    InvalidName,
     /// Resource is unavailable
     ResourceUnavailable,
     /// Attribute operation failed
@@ -109,6 +111,7 @@ impl core::fmt::Display for Error {
         match self {
             Error::NotFound => write!(f, "Attempted to access a non-existent systree item"),
             Error::InvalidOperation => write!(f, "Invalid operation occurred"),
+            Error::InvalidName => write!(f, "the name is invalid"),
             Error::ResourceUnavailable => write!(f, "Resource is unavailable"),
             Error::AttributeError => write!(f, "Attribute error"),
             Error::PermissionDenied => write!(f, "Permission denied for operation"),
