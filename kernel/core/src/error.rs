@@ -351,6 +351,25 @@ impl From<int_to_c_enum::TryFromIntError> for Error {
     }
 }
 
+impl From<aster_device::Error> for Error {
+    fn from(error: aster_device::Error) -> Self {
+        use aster_device::Error as DeviceError;
+
+        let errno = match error {
+            DeviceError::AlreadyAdded => Errno::EBUSY,
+            DeviceError::NotAdded | DeviceError::ParentNotAdded => Errno::ENODEV,
+            DeviceError::HasChildren => Errno::ENOTEMPTY,
+            DeviceError::NameConflict => Errno::EEXIST,
+            DeviceError::NotFound => Errno::ENOENT,
+            DeviceError::InvalidName | DeviceError::InvalidValue => Errno::EINVAL,
+            DeviceError::Attribute | DeviceError::Format | DeviceError::Hook => Errno::EIO,
+            DeviceError::ResourceUnavailable => Errno::ENOSPC,
+            DeviceError::SysTree(inner) => return inner.into(),
+        };
+        Error::new(errno)
+    }
+}
+
 impl From<aster_systree::Error> for Error {
     fn from(err: aster_systree::Error) -> Self {
         use aster_systree::Error::*;

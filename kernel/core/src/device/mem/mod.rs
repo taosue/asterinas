@@ -20,6 +20,7 @@
 
 mod file;
 
+use aster_device::{AnyDevice, Class, ClassDevice, ClassHandle, DevNode, DevNum};
 use device_id::{DeviceId, MajorId, MinorId};
 use file::MemFile;
 pub(crate) use file::{getrandom, geturandom};
@@ -27,7 +28,7 @@ use spin::Once;
 
 use super::{
     Device, DeviceType,
-    registry::char::{MajorIdOwner, acquire_major, register},
+    registry::char::{self, MajorIdOwner},
 };
 use crate::{
     fs::{
@@ -37,22 +38,29 @@ use crate::{
     prelude::*,
 };
 
-/// A memory device.
-#[derive(Debug)]
-pub(crate) struct MemDevice {
-    id: DeviceId,
-    file: MemFile,
-}
+struct MemClass;
 
-impl MemDevice {
-    fn new(file: MemFile) -> Self {
-        let major = MEM_MAJOR.get().unwrap().get();
-        let minor = MinorId::new(file.minor());
+type MemDevice = ClassDevice<MemClass>;
 
-        Self {
-            id: DeviceId::new(major, minor),
-            file,
-        }
+impl Class for MemClass {
+    const NAME: &'static str = "mem";
+    type Device = MemFile;
+
+    fn devnode(&self, dev: &MemDevice) -> Option<DevNode> {
+        // Preserve the memory-device permissions while leaving naming to the
+        // model's default policy. Linux uses the same per-minor modes:
+        // <https://elixir.bootlin.com/linux/v6.18/source/drivers/char/mem.c#L690>.
+        let mode = match dev.payload() {
+            MemFile::Full | MemFile::Null | MemFile::Random | MemFile::Urandom | MemFile::Zero => {
+                mkmod!(a+rw)
+            }
+            MemFile::Kmsg => mkmod!(a+r, u+w),
+            _ => return None,
+        };
+        Some(DevNode {
+            path: None,
+            mode: Some(mode.bits()),
+        })
     }
 }
 
@@ -62,41 +70,70 @@ impl Device for MemDevice {
     }
 
     fn id(&self) -> DeviceId {
-        self.id
+        self.base()
+            .devnum()
+            .expect("memory devices have a device number")
+            .id()
     }
 
     fn devtmpfs_meta(&self) -> Option<DevtmpfsNodeMeta> {
-        // Linux's memory-device table uses nonzero modes only for devices
-        // that override devtmpfs's default `u+rw` permissions.
-        // Reference: <https://elixir.bootlin.com/linux/v6.18/source/drivers/char/mem.c#L690>.
-        // Reference: <https://elixir.bootlin.com/linux/v6.18/source/drivers/char/mem.c#L734>.
-        Some(
-            match self.file {
-                MemFile::Full
-                | MemFile::Null
-                | MemFile::Random
-                | MemFile::Urandom
-                | MemFile::Zero => DevtmpfsNodeMeta::with_mode(self.file.name(), mkmod!(a+rw)),
-                MemFile::Kmsg => DevtmpfsNodeMeta::with_mode(self.file.name(), mkmod!(a+r, u+w)),
-                _ => DevtmpfsNodeMeta::new(self.file.name()),
-            }
-            .unwrap(),
-        )
+        // The device model owns this node's creation and removal.
+        None
     }
 
     fn open(&self) -> Result<Box<dyn PerOpenFileOps>> {
-        Ok(Box::new(self.file))
+        Ok(Box::new(*self.payload()))
     }
 }
 
 static MEM_MAJOR: Once<MajorIdOwner> = Once::new();
+static MEM_CLASS: Once<Arc<ClassHandle<MemClass>>> = Once::new();
 
 pub(super) fn init_in_first_kthread() {
-    MEM_MAJOR.call_once(|| acquire_major(MajorId::new(1)).unwrap());
+    MEM_MAJOR.call_once(|| char::acquire_major(MajorId::new(1)).unwrap());
+    MEM_CLASS.call_once(|| aster_device::register_class(MemClass).unwrap());
 
-    register(Arc::new(MemDevice::new(MemFile::Full))).unwrap();
-    register(Arc::new(MemDevice::new(MemFile::Null))).unwrap();
-    register(Arc::new(MemDevice::new(MemFile::Random))).unwrap();
-    register(Arc::new(MemDevice::new(MemFile::Urandom))).unwrap();
-    register(Arc::new(MemDevice::new(MemFile::Zero))).unwrap();
+    for file in [
+        MemFile::Full,
+        MemFile::Null,
+        MemFile::Random,
+        MemFile::Urandom,
+        MemFile::Zero,
+    ] {
+        add_device(file).unwrap();
+    }
 }
+
+fn add_device(file: MemFile) -> Result<()> {
+    let class = MEM_CLASS.get().unwrap();
+    let id = DeviceId::new(MEM_MAJOR.get().unwrap().get(), MinorId::new(file.minor()));
+    let device = ClassDevice::builder(class, file.name(), file)
+        .devnum(DevNum::char(id))
+        .build();
+
+    // Publish the open backend before the model creates /dev/<name>. The
+    // payload is already complete, so even an existing mknod can open it.
+    char::register(device.clone())?;
+    let mut pending = PendingCharRegistration { id: Some(id) };
+    aster_device::add(&device)?;
+    pending.id = None;
+    Ok(())
+}
+
+/// Unregisters the open backend if model registration fails.
+struct PendingCharRegistration {
+    id: Option<DeviceId>,
+}
+
+impl Drop for PendingCharRegistration {
+    fn drop(&mut self) {
+        if let Some(id) = self.id
+            && let Err(error) = char::unregister(id)
+        {
+            warn!("failed to roll back memory device {:?}: {:?}", id, error);
+        }
+    }
+}
+
+#[cfg(ktest)]
+mod test;

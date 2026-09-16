@@ -34,6 +34,15 @@ pub(super) fn init_in_first_kthread() {
     worker::init_in_first_kthread();
 }
 
+/// Starts the worker and returns the filesystem root for kernel tests.
+#[cfg(ktest)]
+pub(crate) fn init_for_ktest() -> alloc::sync::Arc<dyn crate::fs::vfs::inode::Inode> {
+    use crate::fs::vfs::file_system::FileSystem;
+
+    worker::init_for_ktest();
+    singleton().root_inode()
+}
+
 #[cfg(ktest)]
 mod tests {
     use device_id::{DeviceId, MajorId, MinorId};
