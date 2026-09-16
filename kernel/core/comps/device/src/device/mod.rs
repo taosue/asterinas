@@ -21,7 +21,7 @@ pub use self::{
     registration::{DeviceBuilder, add, remove},
 };
 use crate::{
-    Error, Result, SysStr,
+    DevNode, DevNodeRequest, DevNum, Error, Result, SysStr,
     attr::{AttrTable, TyErasedAttr},
     node::{Dir, SysTreeEdit},
 };
@@ -80,6 +80,7 @@ struct Links {
     subsystem: bool,
     device: bool,
     index: bool,
+    dev_index: bool,
 }
 
 /// Where a device's directory was placed: a plain directory (a root, a glue
@@ -117,6 +118,8 @@ pub struct DeviceBase {
     /// The device this one is reached through, if any.
     parent: Option<Arc<dyn AnyDevice>>,
     state: Mutex<State>,
+    devnum: Option<DevNum>,
+    devnode: Once<DevNodeRequest>,
     /// Which of the symlinks that `add` may create exist, so that `detach`
     /// removes only links this device made.
     links: Mutex<Links>,
@@ -137,6 +140,7 @@ impl DeviceBase {
     fn new(
         name: SysStr,
         parent: Option<Arc<dyn AnyDevice>>,
+        devnum: Option<DevNum>,
         weak_self: Weak<dyn AnyDevice>,
     ) -> Self {
         assert!(
@@ -153,6 +157,8 @@ impl DeviceBase {
             weak_self,
             parent,
             state: Mutex::new(State::Initialized),
+            devnum,
+            devnode: Once::new(),
             links: Mutex::new(Links::default()),
             child_devices: Mutex::new(Vec::new()),
         }
@@ -166,6 +172,11 @@ impl DeviceBase {
     /// Returns the parent device, if any.
     pub fn parent(&self) -> Option<&Arc<dyn AnyDevice>> {
         self.parent.as_ref()
+    }
+
+    /// Returns the device number, if the device can be opened by number.
+    pub fn devnum(&self) -> Option<DevNum> {
+        self.devnum
     }
 
     /// Returns whether registration has completed and the device is still present.
@@ -225,6 +236,7 @@ impl SysTreeEdit for DeviceBase {
 /// The private callbacks used by registration.
 pub(crate) trait DeviceInternals {
     fn attributes(&self) -> Vec<TyErasedAttr>;
+    fn devnode_override(&self) -> Option<DevNode>;
 }
 
 /// The erased device view used for registration, parent links, and sysfs.

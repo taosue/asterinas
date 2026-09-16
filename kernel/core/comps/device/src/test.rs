@@ -214,3 +214,133 @@ fn last_member_removes_virtual_glue() {
     assert!(lookup("devices/virtual/temporary_device_test").is_none());
     assert!(class.devices().is_empty());
 }
+
+#[ktest]
+fn device_nodes_follow_class_policy_and_roll_back() {
+    use alloc::{collections::BTreeMap, format};
+    use core::sync::atomic::AtomicBool;
+
+    use device_id::{DeviceId, MajorId, MinorId};
+    use ostd::sync::Mutex;
+
+    use crate::{DevNode, DevNodeRequest, DevNum, HookError, KernelHooks};
+
+    struct Hooks {
+        nodes: Mutex<BTreeMap<crate::SysStr, DevNodeRequest>>,
+        fail_delete: AtomicBool,
+    }
+
+    impl KernelHooks for Hooks {
+        fn create_devnode(&self, request: &DevNodeRequest) -> crate::Result<(), HookError> {
+            if request.path() == "fail_create" {
+                return Err(HookError);
+            }
+            let mut nodes = self.nodes.lock();
+            if nodes.contains_key(request.path()) {
+                return Err(HookError);
+            }
+            nodes.insert(request.path().clone(), request.clone());
+            Ok(())
+        }
+
+        fn delete_devnode(&self, request: &DevNodeRequest) -> crate::Result<(), HookError> {
+            if self.fail_delete.load(Ordering::Relaxed) {
+                return Err(HookError);
+            }
+            let removed = self.nodes.lock().remove(request.path());
+            assert_eq!(removed.as_ref(), Some(request));
+            Ok(())
+        }
+    }
+
+    struct NodeClass;
+    impl Class for NodeClass {
+        const NAME: &'static str = "node_device_test";
+        type Device = AtomicUsize;
+
+        fn devnode(&self, dev: &ClassDevice<Self>) -> Option<DevNode> {
+            let call = dev.fetch_add(1, Ordering::Relaxed);
+            match dev.base().name().as_ref() {
+                "custom" => Some(DevNode {
+                    path: Some(format!("nested/custom{call}").into()),
+                    mode: Some(0o640),
+                }),
+                "invalid" => Some(DevNode {
+                    path: Some("../invalid".into()),
+                    mode: None,
+                }),
+                _ => None,
+            }
+        }
+    }
+
+    crate::init_for_ktest();
+    let hooks = Arc::new(Hooks {
+        nodes: Mutex::new(BTreeMap::new()),
+        fail_delete: AtomicBool::new(false),
+    });
+    crate::install_hooks(hooks.clone());
+    let class = crate::register_class(NodeClass).unwrap();
+    let number = |minor| DevNum::char(DeviceId::new(MajorId::new(240), MinorId::new(minor)));
+    let make = |name, devnum| {
+        ClassDevice::builder(&class, name, AtomicUsize::new(0))
+            .devnum(devnum)
+            .build()
+    };
+    let custom = make("custom", number(1));
+    crate::add(&custom).unwrap();
+    assert_eq!(custom.show_attr("dev").unwrap(), "240:1\n");
+    let request = hooks.nodes.lock().get("nested/custom0").unwrap().clone();
+    assert_eq!(request.mode(), 0o640);
+    assert_eq!(request.devnum(), number(1));
+    assert_eq!(
+        lookup("dev/char/240:1")
+            .unwrap()
+            .cast_to_symlink()
+            .unwrap()
+            .target_path(),
+        "../../devices/virtual/node_device_test/custom"
+    );
+
+    let duplicate = make("duplicate_number", number(1));
+    assert!(matches!(crate::add(&duplicate), Err(Error::NameConflict)));
+    assert!(lookup("class/node_device_test/duplicate_number").is_none());
+    assert!(lookup("dev/char/240:1").is_some());
+    assert_eq!(hooks.nodes.lock().len(), 1);
+
+    hooks.fail_delete.store(true, Ordering::Relaxed);
+    assert!(matches!(crate::remove(&custom), Err(Error::Hook)));
+    assert!(custom.base().is_added());
+    assert!(lookup("dev/char/240:1").is_some());
+    hooks.fail_delete.store(false, Ordering::Relaxed);
+    crate::remove(&custom).unwrap();
+    assert_eq!(custom.load(Ordering::Relaxed), 1);
+    assert!(lookup("dev/char/240:1").is_none());
+    assert!(hooks.nodes.lock().is_empty());
+
+    let default = make("nested!default", number(2));
+    crate::add(&default).unwrap();
+    assert_eq!(
+        hooks.nodes.lock().get("nested/default").unwrap().mode(),
+        0o600
+    );
+    crate::remove(&default).unwrap();
+
+    for name in ["fail_create", "invalid"] {
+        let failed = make(name, number(3));
+        assert!(crate::add(&failed).is_err());
+        assert!(!failed.base().is_added());
+        assert!(lookup("dev/char/240:3").is_none());
+        assert!(class.devices().is_empty());
+        assert!(lookup("devices/virtual/node_device_test").is_none());
+    }
+    let block_number = DevNum::block(DeviceId::new(MajorId::new(240), MinorId::new(1)));
+    let block = make("block", block_number);
+    let char = make("char", number(1));
+    crate::add(&block).unwrap();
+    crate::add(&char).unwrap();
+    assert!(lookup("dev/block/240:1").is_some());
+    assert!(lookup("dev/char/240:1").is_some());
+    crate::remove(&block).unwrap();
+    crate::remove(&char).unwrap();
+}

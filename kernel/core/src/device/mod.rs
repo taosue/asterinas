@@ -4,6 +4,7 @@ mod evdev;
 mod fb;
 mod mem;
 pub(crate) mod misc;
+mod model;
 mod pty;
 mod registry;
 pub(crate) mod tty;
@@ -52,6 +53,7 @@ pub(crate) enum DeviceType {
 }
 
 pub(crate) fn init_in_first_kthread() {
+    model::install_hooks();
     registry::init_in_first_kthread();
     mem::init_in_first_kthread();
     misc::init_in_first_kthread();

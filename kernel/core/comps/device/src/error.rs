@@ -30,6 +30,8 @@ pub enum Error {
     InvalidValue,
     /// A resource (such as attribute IDs) is exhausted.
     ResourceUnavailable,
+    /// The kernel hooks are unavailable or failed a device-node operation.
+    Hook,
     /// An error from the underlying `SysTree`.
     SysTree(aster_systree::Error),
 }
@@ -48,6 +50,7 @@ impl fmt::Display for Error {
             Error::Attribute => write!(f, "attribute operation failed"),
             Error::InvalidValue => write!(f, "invalid attribute value"),
             Error::ResourceUnavailable => write!(f, "resource unavailable"),
+            Error::Hook => write!(f, "device-node operation failed"),
             Error::SysTree(e) => write!(f, "systree error: {}", e),
         }
     }

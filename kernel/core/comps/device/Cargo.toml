@@ -9,6 +9,7 @@ edition.workspace = true
 aster-systree.workspace = true
 aster-util.workspace = true
 component.workspace = true
+device-id.workspace = true
 ostd.workspace = true
 spin.workspace = true
 

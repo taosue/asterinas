@@ -11,17 +11,25 @@ use aster_systree::SysObj;
 use ostd::sync::Mutex;
 
 use crate::{
-    AnyDevice, Attr, ClassDevice, Result, SysStr,
+    AnyDevice, Attr, ClassDevice, DevNode, Result, SysStr,
     device::SubsystemOps,
     node::{Dir, SysTreeEdit},
 };
 
 /// A class of devices with a shared payload type and attribute declarations.
+///
+/// Callbacks run during registration and must not register classes or add or
+/// remove devices themselves.
 pub trait Class: Sized + Send + Sync + 'static {
     /// The directory name under `/sys/class`.
     const NAME: &'static str;
     /// The data carried by each device in this class.
     type Device: Send + Sync + 'static;
+
+    /// Overrides the device-node path or initial permissions.
+    fn devnode(&self, _dev: &ClassDevice<Self>) -> Option<DevNode> {
+        None
+    }
 
     /// Returns text attributes shared by all devices in this class.
     fn dev_attrs(&self) -> &'static [Attr<ClassDevice<Self>>] {

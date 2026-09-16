@@ -13,7 +13,7 @@ use ostd::mm::{VmReader, VmWriter};
 
 use super::{AnyDevice, DeviceBase, DeviceBuilder, DeviceInternals, Subsystem};
 use crate::{
-    SysStr,
+    DevNode, SysStr,
     attr::{Attr, TyErasedAttr},
     class::{Class, ClassHandle},
 };
@@ -89,7 +89,7 @@ impl<C: Class> ClassDeviceBuilder<C> {
         Arc::new_cyclic(|weak: &Weak<ClassDevice<C>>| {
             let weak_self: Weak<dyn AnyDevice> = weak.clone();
             ClassDevice {
-                base: DeviceBase::new(self.name, self.parent, weak_self),
+                base: DeviceBase::new(self.name, self.parent, self.devnum, weak_self),
                 class: self.handle,
                 payload: self.payload,
                 attrs: self.attrs,
@@ -110,6 +110,10 @@ impl<C: Class> AnyDevice for ClassDevice<C> {
 }
 
 impl<C: Class> DeviceInternals for ClassDevice<C> {
+    fn devnode_override(&self) -> Option<DevNode> {
+        self.class.class().devnode(self)
+    }
+
     fn attributes(&self) -> Vec<TyErasedAttr> {
         let mut attrs = TyErasedAttr::from_typed_slice(self.class.class().dev_attrs());
         attrs.extend(TyErasedAttr::from_typed_slice(self.attrs));

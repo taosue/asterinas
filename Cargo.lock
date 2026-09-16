@@ -206,6 +206,7 @@ dependencies = [
  "aster-systree",
  "aster-util",
  "component",
+ "device-id",
  "ostd",
  "spin",
 ]

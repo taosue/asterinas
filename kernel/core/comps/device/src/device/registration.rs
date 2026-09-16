@@ -2,13 +2,15 @@
 
 //! Device construction and the shared registration lifecycle.
 
-use alloc::sync::Arc;
+use alloc::{string::ToString, sync::Arc};
 
 use aster_systree::SysObj;
 
 use super::{AnyDevice, State, TreeParent};
 use crate::{
-    Attr, Error, Result, SysStr,
+    Attr, DevNodeRequest, DevNum, Error, Result, SysStr,
+    attr::TyErasedAttr,
+    devnum, hooks,
     node::{self, SysTreeEdit},
 };
 
@@ -20,6 +22,7 @@ pub struct DeviceBuilder<H, P, D: ?Sized + 'static> {
     pub(super) payload: P,
     pub(super) name: SysStr,
     pub(super) parent: Option<Arc<dyn AnyDevice>>,
+    pub(super) devnum: Option<DevNum>,
     pub(super) attrs: &'static [Attr<D>],
 }
 
@@ -30,8 +33,15 @@ impl<H, P, D: ?Sized + 'static> DeviceBuilder<H, P, D> {
             payload,
             name,
             parent: None,
+            devnum: None,
             attrs: &[],
         }
+    }
+
+    /// Sets the device number used by `/sys/dev` and the `/dev` node.
+    pub fn devnum(mut self, devnum: DevNum) -> Self {
+        self.devnum = Some(devnum);
+        self
     }
 
     /// Sets the parent, which must be registered before this device.
@@ -65,7 +75,11 @@ pub fn add<D: AnyDevice + ?Sized>(dev: &Arc<D>) -> Result<()> {
         dev: &dev,
         is_committed: false,
     };
-    base.attrs.add(dev.attributes())?;
+    let mut attrs = dev.attributes();
+    if base.devnum().is_some() {
+        attrs.push(TyErasedAttr::from_dyn(&DEV_ATTR));
+    }
+    base.attrs.add(attrs)?;
 
     if let Some(parent) = base.parent() {
         if !parent.base().is_added() {
@@ -94,6 +108,28 @@ pub fn add<D: AnyDevice + ?Sized>(dev: &Arc<D>) -> Result<()> {
     node::add_link(subsystem.ops.index_dir().as_ref(), base.name(), &dev.path())?;
     base.links.lock().index = true;
 
+    if let Some(devnum) = base.devnum() {
+        node::add_link(
+            registry.dev_index(devnum.kind()).as_ref(),
+            &devnum.to_string(),
+            &dev.path(),
+        )?;
+        base.links.lock().dev_index = true;
+        let policy = dev.devnode_override().unwrap_or_default();
+        let path = policy
+            .path
+            .unwrap_or_else(|| base.name().replace('!', "/").into());
+        let request = DevNodeRequest::new(
+            devnum,
+            path,
+            policy.mode.unwrap_or(devnum::DEFAULT_DEVNODE_MODE),
+        )?;
+        hooks::create_devnode(&request)?;
+        // Cache the successful request: deletion must not call a possibly
+        // stateful class policy a second time.
+        base.devnode.call_once(|| request);
+    }
+
     *base.state.lock() = State::Added;
     subsystem.ops.on_added(&dev);
     if let Some(parent) = base.parent() {
@@ -119,6 +155,9 @@ pub fn remove<D: AnyDevice + ?Sized>(dev: &Arc<D>) -> Result<()> {
     }
     if !base.child_devices.lock().is_empty() {
         return Err(Error::HasChildren);
+    }
+    if let Some(request) = base.devnode.get() {
+        hooks::delete_devnode(request)?;
     }
     *base.state.lock() = State::Removed;
     if let Some(parent) = base.parent() {
@@ -154,6 +193,15 @@ fn detach(dev: &Arc<dyn AnyDevice>) {
     let links = base.links.lock();
     // Remove only resources acquired by this attempt, preserving conflicting
     // entries owned by an existing device.
+    if links.dev_index {
+        let devnum = base
+            .devnum()
+            .expect("a device-number link requires a number");
+        node::remove_link(
+            crate::registry().dev_index(devnum.kind()).as_ref(),
+            &devnum.to_string(),
+        );
+    }
     if links.index {
         node::remove_link(subsystem.ops.index_dir().as_ref(), base.name());
     }
@@ -175,3 +223,9 @@ fn detach(dev: &Arc<dyn AnyDevice>) {
         }
     }
 }
+
+const DEV_ATTR: Attr<dyn AnyDevice> = Attr::ro("dev", |dev, writer| {
+    let devnum = dev.base().devnum().ok_or(Error::InvalidValue)?;
+    writeln!(writer, "{devnum}")?;
+    Ok(())
+});
