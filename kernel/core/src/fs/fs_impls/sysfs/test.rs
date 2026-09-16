@@ -533,3 +533,41 @@ fn mode_permissions() {
     let leaf1_mode = leaf1_dir_inode.mode().unwrap();
     assert!(leaf1_mode.contains(mkmod!(a+rx))); // Read/execute for all users
 }
+
+#[ktest]
+fn device_removal_invalidates_cached_inodes() {
+    use aster_device::{Class, ClassDevice};
+
+    struct CacheTestClass;
+    impl Class for CacheTestClass {
+        const NAME: &'static str = "sysfs_cache_test";
+        type Device = ();
+    }
+
+    time_init_for_ktest();
+    aster_device::init_for_ktest();
+    let class = aster_device::register_class(CacheTestClass).unwrap();
+    let dev = ClassDevice::builder(&class, "cached", ()).build();
+    aster_device::add(&dev).unwrap();
+
+    let sysfs = SysFs::new_for_ktest();
+    let class_inode = sysfs
+        .root_inode()
+        .lookup("class")
+        .unwrap()
+        .lookup("sysfs_cache_test")
+        .unwrap();
+    let cached = class_inode.lookup("cached").unwrap();
+    assert!(class_inode.revalidate_exists("cached", cached.as_ref()));
+    aster_device::remove(&dev).unwrap();
+    assert!(!class_inode.revalidate_exists("cached", cached.as_ref()));
+    assert!(class_inode.lookup("cached").is_err());
+
+    let replacement = ClassDevice::builder(&class, "cached", ()).build();
+    aster_device::add(&replacement).unwrap();
+    assert!(!class_inode.revalidate_absent("cached"));
+    assert!(!class_inode.revalidate_exists("cached", cached.as_ref()));
+    let fresh = class_inode.lookup("cached").unwrap();
+    assert!(class_inode.revalidate_exists("cached", fresh.as_ref()));
+    aster_device::remove(&replacement).unwrap();
+}

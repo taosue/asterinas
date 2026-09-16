@@ -41,6 +41,7 @@ members = [
     "kernel/core/comps/nvme",
     "kernel/core/comps/pci",
     "kernel/core/comps/softirq",
+    "kernel/core/comps/device",
     "kernel/core/comps/systree",
     "kernel/core/comps/time",
     "kernel/core/comps/virtio",
@@ -92,6 +93,7 @@ default-members = [
     "kernel/core/comps/nvme",
     "kernel/core/comps/pci",
     "kernel/core/comps/softirq",
+    "kernel/core/comps/device",
     "kernel/core/comps/systree",
     "kernel/core/comps/time",
     "kernel/core/comps/virtio",
@@ -174,6 +176,7 @@ aster-network = { path = "kernel/core/comps/network" }
 aster-nvme = { path = "kernel/core/comps/nvme" }
 aster-pci = { path = "kernel/core/comps/pci" }
 aster-softirq = { path = "kernel/core/comps/softirq" }
+aster-device = { path = "kernel/core/comps/device" }
 aster-systree = { path = "kernel/core/comps/systree" }
 aster-time = { path = "kernel/core/comps/time" }
 aster-virtio = { path = "kernel/core/comps/virtio" }
